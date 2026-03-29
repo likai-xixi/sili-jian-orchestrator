@@ -1,0 +1,36 @@
+name: new-project
+steps:
+  - id: identify-project
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [project-meta, start-here]
+  - id: bootstrap-governance
+    depends_on: [identify-project]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [ai-structure, workflow-templates, docs-root]
+  - id: create-run-snapshot
+    depends_on: [bootstrap-governance]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [run-snapshot]
+  - id: freeze-initial-plan
+    depends_on: [create-run-snapshot]
+    role: neige
+    agent_id: neige
+    outputs: [architecture, task-tree, task-intake]
+  - id: plan-audit
+    depends_on: [freeze-initial-plan]
+    role: duchayuan
+    agent_id: duchayuan
+    outputs: [architecture-review]
+  - id: update-state-and-handoff
+    depends_on: [plan-audit]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [orchestrator-state, project-handoff, agent-sessions]
+review_points:
+  - plan-approval
+recovery_points:
+  - after-bootstrap
+  - after-plan-freeze

@@ -1,0 +1,36 @@
+name: takeover-project
+steps:
+  - id: identify-project
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [project-identity]
+  - id: inspect-governance
+    depends_on: [identify-project]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [takeover-report]
+  - id: backfill-governance
+    depends_on: [inspect-governance]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [missing-state, missing-reports, missing-workflows, docs-root]
+  - id: planning-repair
+    depends_on: [backfill-governance]
+    role: neige
+    agent_id: neige
+    outputs: [repaired-architecture, repaired-task-tree]
+  - id: backfill-tests
+    depends_on: [planning-repair]
+    role: bingbu
+    agent_id: bingbu
+    outputs: [test-baseline, takeover-test-report]
+  - id: update-state-and-handoff
+    depends_on: [backfill-tests]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [orchestrator-state, project-handoff, agent-sessions]
+review_points:
+  - takeover-readiness
+recovery_points:
+  - after-inspection
+  - after-backfill

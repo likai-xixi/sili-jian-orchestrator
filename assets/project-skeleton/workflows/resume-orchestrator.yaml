@@ -1,0 +1,30 @@
+name: resume-orchestrator
+steps:
+  - id: read-recovery-entry
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [recovery-context]
+  - id: read-latest-reports
+    depends_on: [read-recovery-entry]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [report-context]
+  - id: read-active-handoffs
+    depends_on: [read-latest-reports]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [handoff-context, agent-sessions]
+  - id: produce-recovery-summary
+    depends_on: [read-active-handoffs]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [recovery-summary, next-action]
+  - id: update-state-and-handoff
+    depends_on: [produce-recovery-summary]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [orchestrator-state, project-handoff]
+review_points:
+  - execution-readiness
+recovery_points:
+  - after-summary

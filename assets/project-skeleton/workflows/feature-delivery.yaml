@@ -1,0 +1,75 @@
+name: feature-delivery
+steps:
+  - id: intake-feature
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [requirements-pool-update]
+  - id: confirm-or-replan
+    depends_on: [intake-feature]
+    role: neige
+    agent_id: neige
+    outputs: [architecture-impact, task-tree-update, frozen-scope]
+  - id: plan-approval
+    depends_on: [confirm-or-replan]
+    role: duchayuan
+    agent_id: duchayuan
+    outputs: [plan-decision]
+  - id: libu2-implementation
+    depends_on: [plan-approval]
+    role: libu2
+    agent_id: libu2
+    outputs: [backend-implementation, libu2-handoff, libu2-self-check]
+  - id: hubu-implementation
+    depends_on: [plan-approval]
+    role: hubu
+    agent_id: hubu
+    outputs: [data-implementation, hubu-handoff, hubu-self-check]
+  - id: gongbu-implementation
+    depends_on: [plan-approval]
+    role: gongbu
+    agent_id: gongbu
+    outputs: [frontend-implementation, gongbu-handoff, gongbu-self-check]
+  - id: bingbu-testing
+    depends_on: [libu2-implementation, hubu-implementation, gongbu-implementation]
+    role: bingbu
+    agent_id: bingbu
+    outputs: [test-report, bingbu-handoff]
+  - id: libu-documentation
+    depends_on: [bingbu-testing]
+    role: libu
+    agent_id: libu
+    outputs: [doc-updates, change-summary-draft, libu-handoff]
+  - id: xingbu-release-check
+    depends_on: [libu-documentation]
+    role: xingbu
+    agent_id: xingbu
+    outputs: [gate-report, xingbu-handoff]
+  - id: department-review
+    depends_on: [xingbu-release-check]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [department-approval-matrix]
+  - id: final-audit
+    depends_on: [department-review]
+    role: duchayuan
+    agent_id: duchayuan
+    outputs: [acceptance-report]
+  - id: release-prep
+    depends_on: [final-audit]
+    role: libu
+    agent_id: libu
+    outputs: [change-summary]
+  - id: update-state-and-run-summary
+    depends_on: [release-prep]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [orchestrator-state, project-handoff, run-summary, agent-sessions]
+review_points:
+  - plan-impact
+  - department-review
+  - final-audit
+recovery_points:
+  - after-intake
+  - after-plan-approval
+  - after-implementation
+  - after-department-review

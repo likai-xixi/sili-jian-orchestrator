@@ -1,0 +1,23 @@
+# Task Card Example
+
+- task_id: FEAT-001-libu2-api
+- target_agent: libu2
+- target_agent_id: libu2
+- dispatch_mode: spawn
+- cleanup_policy: delete
+- session_key:
+- return_to: orchestrator
+- title: Add governed order submission API
+- goal: Implement the approved backend API for order submission without changing unrelated flows.
+- allowed_paths: src/api/orders, src/services/orders, tests/unit/orders, tests/integration/orders
+- forbidden_paths: src/ui, workflows, ai/state/project-meta.json
+- dependencies: architecture v0.2 approved, task-tree updated, hubu migration reviewed
+- acceptance: API accepts valid payloads, rejects invalid payloads, emits audit-safe errors, and matches approved contract
+- handoff_path: ai/handoff/libu2/active/FEAT-001-libu2-api.md
+- expected_output: implementation diff, self-check notes, handoff update
+- review_required: yes
+- upstream_dependencies: FEAT-001-plan-approval, FEAT-001-hubu-schema
+- downstream_reviewers: bingbu, hubu, xingbu
+- testing_requirement: add unit and integration coverage for happy path and validation failures
+- workflow_step_id: libu2-implementation
+- priority: P1

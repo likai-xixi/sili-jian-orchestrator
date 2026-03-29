@@ -1,0 +1,36 @@
+name: review-and-release
+steps:
+  - id: collect-basic-gates
+    role: xingbu
+    agent_id: xingbu
+    outputs: [gate-report]
+  - id: collect-department-approvals
+    depends_on: [collect-basic-gates]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [department-approval-matrix]
+  - id: verify-mainline-and-rollback
+    depends_on: [collect-department-approvals]
+    role: xingbu
+    agent_id: xingbu
+    outputs: [mainline-status, rollback-point]
+  - id: final-audit
+    depends_on: [verify-mainline-and-rollback]
+    role: duchayuan
+    agent_id: duchayuan
+    outputs: [acceptance-report]
+  - id: prepare-release-summary
+    depends_on: [final-audit]
+    role: libu
+    agent_id: libu
+    outputs: [change-summary]
+  - id: update-state-and-handoff
+    depends_on: [prepare-release-summary]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [orchestrator-state, project-handoff, agent-sessions]
+review_points:
+  - final-audit
+recovery_points:
+  - after-gate-collection
+  - after-final-audit

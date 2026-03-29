@@ -1,0 +1,10 @@
+{
+  "project_id": "{{PROJECT_ID}}",
+  "project_name": "{{PROJECT_NAME}}",
+  "project_version": "0.1.0",
+  "architecture_version": "0.1.0",
+  "task_tree_version": "0.1.0",
+  "release_version": null,
+  "governance_mode": "single-person-heavy-governance",
+  "created_by_skill": "sili-jian-orchestrator"
+}

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Sili Jian Orchestrator"
+  short_description: "Take over, recover, and govern long-running software projects."
+  default_prompt: "Use $sili-jian-orchestrator to run first-use guidance, then take over or recover this software project before implementation."
+
+policy:
+  allow_implicit_invocation: false

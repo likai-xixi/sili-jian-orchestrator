@@ -1,0 +1,28 @@
+{
+  "project_id": "{{PROJECT_ID}}",
+  "project_name": "{{PROJECT_NAME}}",
+  "current_phase": "planning",
+  "current_status": "draft",
+  "current_workflow": "new-project",
+  "current_run_id": null,
+  "primary_goal": "Establish governed project structure and freeze the initial plan.",
+  "next_action": "Create architecture.md and task-tree.json from the initial requirement.",
+  "next_owner": "orchestrator",
+  "active_tasks": [
+    {
+      "task_id": "BOOTSTRAP-PLAN",
+      "role": "orchestrator",
+      "status": "in-progress",
+      "handoff_path": "ai/handoff/orchestrator/active/BOOTSTRAP-PLAN.md"
+    }
+  ],
+  "blockers": [],
+  "blocker_level": "none",
+  "priority_top": "P1",
+  "mainline_status": "not-started",
+  "last_heartbeat_goal": "Initialize governance and planning artifacts.",
+  "last_heartbeat_reason": "No execution is allowed until the first plan is frozen.",
+  "execution_allowed": false,
+  "testing_allowed": false,
+  "release_allowed": false
+}

@@ -1,0 +1,50 @@
+{
+  "neige": {
+    "agent_id": "neige",
+    "session_key": null,
+    "status": "idle",
+    "last_task_id": null
+  },
+  "bingbu": {
+    "agent_id": "bingbu",
+    "session_key": null,
+    "status": "idle",
+    "last_task_id": null
+  },
+  "libu2": {
+    "agent_id": "libu2",
+    "session_key": null,
+    "status": "idle",
+    "last_task_id": null
+  },
+  "hubu": {
+    "agent_id": "hubu",
+    "session_key": null,
+    "status": "idle",
+    "last_task_id": null
+  },
+  "gongbu": {
+    "agent_id": "gongbu",
+    "session_key": null,
+    "status": "idle",
+    "last_task_id": null
+  },
+  "xingbu": {
+    "agent_id": "xingbu",
+    "session_key": null,
+    "status": "idle",
+    "last_task_id": null
+  },
+  "libu": {
+    "agent_id": "libu",
+    "session_key": null,
+    "status": "idle",
+    "last_task_id": null
+  },
+  "duchayuan": {
+    "agent_id": "duchayuan",
+    "session_key": null,
+    "status": "idle",
+    "last_task_id": null
+  }
+}
