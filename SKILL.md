@@ -28,6 +28,11 @@ If the current directory is the skill bundle itself:
 - explain how to invoke the skill against a target project
 - do not create project governance files here
 
+If the current directory is an OpenClaw workspace root:
+- explain that this root may host multiple skills or shared workspace assets
+- do not treat it as a single business project
+- require the user to switch into the actual target project directory before bootstrap
+
 If the current directory is a target project:
 - proceed from first-run guidance into project inspection
 - then produce the first-round takeover result before execution
@@ -59,6 +64,11 @@ Before doing anything else, determine the current directory mode.
 - The current directory is a target software project.
 - Signals include `src/`, `tests/`, `docs/`, `ai/`, `.git/`, or an explicit user statement that this is the project root.
 - In this mode, you may bootstrap governance into the target project.
+
+`workspace_root_mode`
+- The current directory is an OpenClaw workspace root, not a single business project root.
+- Signals include `skills/` containing multiple installed skills, `OpenClaw/skills/`, or a mixed root used for agent workspaces and shared tooling.
+- In this mode, do not bootstrap project governance. Require the user to switch into the real business project root first.
 
 `unknown_mode`
 - The directory cannot be confidently classified.

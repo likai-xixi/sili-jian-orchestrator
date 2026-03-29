@@ -13,6 +13,11 @@ def build_next_prompt(mode: str) -> str:
             "Use $sili-jian-orchestrator on the target project directory. "
             "First identify the project, inspect governance readiness, and output the first-round takeover result."
         )
+    if mode == "workspace_root_mode":
+        return (
+            "Do not bootstrap governance here. "
+            "Switch to the real business project root, then use $sili-jian-orchestrator to run first-use guidance again."
+        )
     if mode == "project_mode":
         return (
             "Use $sili-jian-orchestrator to take over this project. "
@@ -27,6 +32,8 @@ def build_next_prompt(mode: str) -> str:
 def build_safe_next_action(mode: str, dispatch_ready: bool) -> str:
     if mode == "skill_bundle_mode":
         return "Install or invoke the skill from a real project directory; do not create governance files here."
+    if mode == "workspace_root_mode":
+        return "Stop here and switch into the real business project root before any governance bootstrap."
     if mode == "project_mode" and dispatch_ready:
         return "Run project inspection and first-round takeover before any implementation."
     if mode == "project_mode":
@@ -37,6 +44,7 @@ def build_safe_next_action(mode: str, dispatch_ready: bool) -> str:
 def build_environment_meaning(mode: str) -> str:
     mapping = {
         "skill_bundle_mode": "You are inside the skill package itself, not inside a governed software project.",
+        "workspace_root_mode": "You are inside an OpenClaw workspace root that may contain skills or shared tooling; do not treat it as a single business project root.",
         "project_mode": "You are inside a target software project and may proceed with governance-first takeover.",
         "unknown_mode": "The current directory cannot be confidently classified yet.",
     }

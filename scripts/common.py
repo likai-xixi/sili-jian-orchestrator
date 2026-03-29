@@ -192,10 +192,23 @@ def extract_conclusion(markdown: str, heading: str) -> str:
     return ""
 
 
+def is_workspace_root(path: Path) -> bool:
+    skills_dir = path / "skills"
+    if skills_dir.exists() and skills_dir.is_dir():
+        skill_entries = list(skills_dir.glob("*/SKILL.md"))
+        if skill_entries:
+            return True
+    if (path / "OpenClaw" / "skills").exists():
+        return True
+    return False
+
+
 def scenario_from_intent(intent: str, project_root: Path) -> str:
     normalized = intent.strip().lower()
     if normalized and normalized != "auto":
         return normalized.replace("_", "-")
+    if detect_directory_mode(project_root) == "workspace_root_mode":
+        return "workspace-root"
     state = read_json(project_root / "ai" / "state" / "orchestrator-state.json")
     current_status = str(state.get("current_status", "")).lower()
     current_workflow = str(state.get("current_workflow", "")).lower()
@@ -215,6 +228,8 @@ def detect_directory_mode(path: Path) -> str:
         return "skill_bundle_mode"
     if (path / "assets" / "project-skeleton").exists() and (path / "scripts" / "bootstrap_governance.py").exists():
         return "skill_bundle_mode"
+    if is_workspace_root(path):
+        return "workspace_root_mode"
     if (path / ".git").exists() or (path / "src").exists() or (path / "ai").exists() or (path / "tests").exists():
         return "project_mode"
     return "unknown_mode"
@@ -231,6 +246,7 @@ def latest_run_dir(project_root: Path) -> Path | None:
 
 
 def inspect_project(project_root: Path, intent: str = "auto") -> dict[str, Any]:
+    mode = detect_directory_mode(project_root)
     state_dir = project_root / "ai" / "state"
     reports_dir = project_root / "ai" / "reports"
     workflows_dir = project_root / "workflows"
@@ -266,8 +282,8 @@ def inspect_project(project_root: Path, intent: str = "auto") -> dict[str, Any]:
     testing_allowed = bool(orchestrator_state.get("testing_allowed", False))
     release_allowed = bool(orchestrator_state.get("release_allowed", False))
     scenario = scenario_from_intent(intent, project_root)
-    planning_ready = core_state_exists and architecture_ready and task_tree_is_ready and frozen_requirement_present
-    execution_ready = planning_ready and execution_allowed and orchestrator_state.get("current_status") in {
+    planning_ready = mode == "project_mode" and core_state_exists and architecture_ready and task_tree_is_ready and frozen_requirement_present
+    execution_ready = mode == "project_mode" and planning_ready and execution_allowed and orchestrator_state.get("current_status") in {
         "plan-approved",
         "executing",
         "self-check",
@@ -278,13 +294,13 @@ def inspect_project(project_root: Path, intent: str = "auto") -> dict[str, Any]:
         "committed",
         "archived",
     }
-    testing_ready = execution_ready and testing_allowed and "test-report.md" not in missing_report_files and not text_has_placeholders(test_text)
+    testing_ready = mode == "project_mode" and execution_ready and testing_allowed and "test-report.md" not in missing_report_files and not text_has_placeholders(test_text)
 
     return {
         "project_root": str(project_root.resolve()),
         "project_name": project_meta.get("project_name") or project_root.name,
         "project_id": project_meta.get("project_id") or project_root.name,
-        "mode": detect_directory_mode(project_root),
+        "mode": mode,
         "scenario": scenario,
         "ai_exists": (project_root / "ai").exists(),
         "tests_exists": tests_dir.exists(),
