@@ -1,5 +1,7 @@
 # 司礼监总调度技能
 
+[![Skill CI](https://github.com/likai-xixi/sili-jian-orchestrator/actions/workflows/skill-ci.yml/badge.svg)](https://github.com/likai-xixi/sili-jian-orchestrator/actions/workflows/skill-ci.yml)
+
 `sili-jian-orchestrator` 是一个面向 OpenClaw 的项目治理型技能。它不是普通编码助手，而是“司礼监 / 总调度 Agent”的技能封装：优先负责项目识别、场景分流、治理初始化、状态维护、交接恢复、门禁检查，以及对内阁、都察院、六部的真实调度。
 
 ## 这个技能能做什么
