@@ -16,8 +16,8 @@ def build_next_prompt(mode: str, lang: str) -> str:
             )
         if mode == "workspace_root_mode":
             return (
-                "Do not bootstrap governance here. "
-                "Switch to the real business project root, then use $sili-jian-orchestrator to run first-use guidance again."
+                "If you already have a real business project, switch into that project root and rerun first-use guidance. "
+                "If you are still defining a brand new project from this workspace root, use scripts/project_intake.py first."
             )
         if mode == "project_mode":
             return (
@@ -32,7 +32,7 @@ def build_next_prompt(mode: str, lang: str) -> str:
     if mode == "skill_bundle_mode":
         return "使用 $sili-jian-orchestrator 到真实项目目录中执行首次启用引导，并输出首轮接管结果。"
     if mode == "workspace_root_mode":
-        return "不要在这里初始化治理骨架。请先切换到真实业务项目根目录，再重新执行首次启用引导。"
+        return "如果你已经有真实业务项目，请先切换到该项目根目录再运行首次启用引导。如果你还在这个 workspace 根目录里定义全新项目，先使用 scripts/project_intake.py。"
     if mode == "project_mode":
         return "使用 $sili-jian-orchestrator 接管当前项目，先做治理检查和首轮接管结果输出，不要直接开发。"
     return "请先切换到目标项目目录，或者明确告诉技能当前目录是技能目录还是项目目录。"
@@ -43,7 +43,7 @@ def build_safe_next_action(mode: str, dispatch_ready: bool, lang: str) -> str:
         if mode == "skill_bundle_mode":
             return "Install or invoke the skill from a real project directory; do not create governance files here."
         if mode == "workspace_root_mode":
-            return "Stop here and switch into the real business project root before any governance bootstrap."
+            return "Either switch into the real business project root, or stay here and use scripts/project_intake.py to create a new governed project."
         if mode == "project_mode" and dispatch_ready:
             return "Run project inspection and first-round takeover before any implementation."
         if mode == "project_mode":
@@ -51,9 +51,9 @@ def build_safe_next_action(mode: str, dispatch_ready: bool, lang: str) -> str:
         return "Clarify the intended target directory before taking further action."
 
     if mode == "skill_bundle_mode":
-        return "这里只是技能目录，请在真实项目目录中调用技能，不要在这里创建治理文件。"
+        return "这里是技能目录，请在真实项目目录中调用技能，不要在这里创建治理文件。"
     if mode == "workspace_root_mode":
-        return "这里是 OpenClaw workspace 根目录，请先切换到真实业务项目根目录，再进行治理初始化。"
+        return "这里是 OpenClaw workspace 根目录。可以切换到真实业务项目根目录，或留在这里用 scripts/project_intake.py 创建全新受治理项目。"
     if mode == "project_mode" and dispatch_ready:
         return "先执行项目治理检查和首轮接管，不要直接进入实现。"
     if mode == "project_mode":

@@ -11,6 +11,10 @@
 - Highest priority: P1
 - Blocker level: none
 - Mainline status: not-started
+- Review phase: normal-review
+- Review escalation level: none
+- Review rounds before cabinet: 0 / 4
+- Review rounds after cabinet: 0 / 2
 - Latest plan review conclusion: pending
 - Latest result audit conclusion: pending
 - Latest test conclusion: pending
@@ -29,4 +33,4 @@
 
 ## Notes For Next Round
 
-- Freeze requirements before enabling execution.
+- Complete document review and customer confirmation before enabling execution.

@@ -65,6 +65,12 @@ def build_report(info: dict) -> str:
 13. Planning-stage entry conditions
    - {'Yes' if info['planning_ready'] else 'No'}
 
+13a. Current implementation summary ready
+   - {'Yes' if info.get('implementation_summary_ready') else 'No'}
+
+13b. Customer acknowledged current implementation baseline
+   - {'Yes' if info.get('customer_acknowledged_implementation') else 'No'}
+
 14. Execution-stage entry conditions
    - {'Yes' if info['execution_ready'] else 'No'}
 
@@ -79,6 +85,12 @@ def build_report(info: dict) -> str:
 
 18. Latest plan review conclusion
    - {info['plan_review_conclusion'] or 'None'}
+
+18a. Customer confirmed requirement and scope
+   - {'Yes' if info.get('customer_confirmed_requirement') else 'No'}
+
+18b. Approved to start development
+   - {'Yes' if info.get('development_approved') else 'No'}
 
 19. Latest result audit conclusion
    - {info['final_audit_conclusion'] or 'None'}

@@ -8,7 +8,32 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+def collect_git_tracked_py_targets() -> list[Path]:
+    completed = subprocess.run(
+        ["git", "ls-files", "--cached", "--", "scripts", "tests", "assets/project-skeleton/ai/tools"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return []
+    targets: list[Path] = []
+    for raw_line in completed.stdout.splitlines():
+        path = raw_line.strip()
+        if not path.endswith(".py"):
+            continue
+        candidate = REPO_ROOT / path
+        if candidate.name == "__init__.py" or not candidate.exists():
+            continue
+        targets.append(candidate)
+    return sorted(set(targets))
+
+
 def collect_py_targets() -> list[Path]:
+    tracked = collect_git_tracked_py_targets()
+    if tracked:
+        return tracked
     targets: set[Path] = set()
     roots = [
         REPO_ROOT / "scripts",
@@ -36,6 +61,7 @@ def main() -> None:
     py_compile_targets = collect_py_targets()
     if not py_compile_targets:
         raise SystemExit("No Python targets found for repository CI.")
+    run_step("Verify scaffolded ai/tools sync", [sys.executable, "scripts/sync_project_tools.py", "--check"])
     compile_command = [sys.executable, "-m", "py_compile", *[str(path) for path in py_compile_targets]]
     run_step("Compile critical scripts", compile_command)
     run_step("Run regression tests", [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"])

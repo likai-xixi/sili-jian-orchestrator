@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from common import read_json, read_text, text_has_placeholders
+from common import extract_field_value, read_json, read_text, text_has_placeholders
 
 
 WORKFLOW_STEP_IDS = {
@@ -25,33 +25,47 @@ WORKFLOW_STEP_IDS = {
         "update-state-and-handoff",
     },
     "resume-orchestrator": {
-        "load-recovery-entry",
-        "load-state-and-reports",
-        "summarize-recovery",
-        "resume-next-action",
+        "read-recovery-entry",
+        "read-latest-reports",
+        "read-active-handoffs",
+        "produce-recovery-summary",
+        "update-state-and-handoff",
     },
     "feature-delivery": {
-        "plan-approved-batch",
+        "intake-feature",
+        "confirm-or-replan",
+        "plan-approval",
         "libu2-implementation",
-        "hubu-data-work",
-        "gongbu-ui-work",
-        "bingbu-test-pass",
+        "hubu-implementation",
+        "gongbu-implementation",
+        "libu2-cross-review",
+        "hubu-cross-review",
+        "gongbu-cross-review",
+        "bingbu-cross-review",
+        "libu-cross-review",
+        "xingbu-cross-review",
+        "duchayuan-cross-review",
+        "department-review",
+        "bingbu-testing",
         "libu-documentation",
         "xingbu-release-check",
-        "department-review",
-        "duchayuan-final-audit",
-        "state-and-summary-update",
+        "final-audit",
+        "release-prep",
+        "update-state-and-run-summary",
+    },
+    "review-and-release": {
+        "collect-basic-gates",
+        "collect-department-approvals",
+        "verify-mainline-and-rollback",
+        "final-audit",
+        "prepare-release-summary",
+        "update-state-and-handoff",
     },
 }
 
 
 def extract_markdown_value(markdown: str, label: str) -> str:
-    prefix = f"- {label}:"
-    for line in markdown.splitlines():
-        stripped = line.strip()
-        if stripped.startswith(prefix):
-            return stripped[len(prefix):].strip()
-    return ""
+    return extract_field_value(markdown, label)
 
 
 def normalize(value: str) -> str:
@@ -97,6 +111,7 @@ def render_markdown(report: dict) -> str:
 
 
 def validate(project_root: Path) -> dict:
+    project_root = project_root.resolve()
     state_dir = project_root / "ai" / "state"
     handoff_root = project_root / "ai" / "handoff"
 
@@ -268,6 +283,19 @@ def validate(project_root: Path) -> dict:
         handoff_path = Path(handoff_ref)
         if not handoff_path.is_absolute():
             handoff_path = project_root / handoff_path
+        handoff_path = handoff_path.resolve()
+
+        try:
+            handoff_path.relative_to(project_root)
+        except ValueError:
+            findings.append(
+                {
+                    "code": "active_task_handoff_outside_project_root",
+                    "severity": "error",
+                    "message": f"Active task '{task_id}' points outside the project root: {handoff_path}.",
+                }
+            )
+            continue
 
         if not handoff_path.exists():
             findings.append(
@@ -322,7 +350,7 @@ def validate(project_root: Path) -> dict:
                 }
             )
 
-        if task_status == "in-progress" and role:
+        if task_status in {"in-progress", "blocked"} and role:
             in_progress_roles.append(normalize(role))
 
     if current_workflow == "takeover-project":

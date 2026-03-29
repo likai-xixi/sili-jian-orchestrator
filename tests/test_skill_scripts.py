@@ -1,9 +1,11 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -11,9 +13,124 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import repair_state  # noqa: E402
+import automation_control  # noqa: E402
+import bootstrap_governance  # noqa: E402
+import change_request_control  # noqa: E402
+import close_session  # noqa: E402
+import completion_consumer  # noqa: E402
+import configure_review_controls  # noqa: E402
+import context_rollover  # noqa: E402
+import environment_bootstrap  # noqa: E402
+import escalation_manager  # noqa: E402
+import evidence_collector  # noqa: E402
+import first_run_check  # noqa: E402
+import host_interface_probe  # noqa: E402
+import inbox_watcher  # noqa: E402
+import natural_language_control  # noqa: E402
+import openclaw_adapter  # noqa: E402
+import openclaw_runtime_bridge  # noqa: E402
+import orchestrator_local_steps  # noqa: E402
+import parent_session_recovery  # noqa: E402
+import project_intake  # noqa: E402
+import provider_evidence  # noqa: E402
+import replan_change_request  # noqa: E402
+import render_agent_repair_brief  # noqa: E402
+import repo_command_detector  # noqa: E402
+import resume_customer_decision  # noqa: E402
+import run_orchestrator  # noqa: E402
+import runtime_environment  # noqa: E402
+import runtime_loop  # noqa: E402
+import session_registry  # noqa: E402
+import sync_project_tools  # noqa: E402
 import validate_gates  # noqa: E402
 import validate_state  # noqa: E402
-from common import ensure_handoff_stub, scenario_from_intent  # noqa: E402
+import workflow_engine  # noqa: E402
+from common import ensure_handoff_stub, inspect_project, scenario_from_intent  # noqa: E402
+
+
+def write_transport_helper(script_path: Path) -> None:
+    script_path.write_text(
+        """import json
+import sys
+from pathlib import Path
+
+
+def extract_field(task_text: str, field_name: str) -> str:
+    prefix = f"- {field_name}:"
+    for raw_line in task_text.splitlines():
+        line = raw_line.strip()
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+    return ""
+
+
+dispatch_path = Path(sys.argv[1]).resolve()
+envelope = json.loads(dispatch_path.read_text(encoding="utf-8"))
+project_root = dispatch_path.parents[3]
+payload = envelope.get("payload", {})
+task_text = payload.get("task") or payload.get("message") or ""
+completion = {
+    "agent_id": envelope.get("agent_id"),
+    "task_id": extract_field(task_text, "task_id") or envelope.get("dispatch_id"),
+    "workflow_step_id": extract_field(task_text, "workflow_step_id"),
+    "status": "completed",
+    "summary": "Auto-completed by the transport helper.",
+}
+inbox_dir = project_root / "ai" / "runtime" / "inbox"
+inbox_dir.mkdir(parents=True, exist_ok=True)
+(inbox_dir / f"{envelope['dispatch_id']}.json").write_text(json.dumps(completion, indent=2), encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
+
+
+def write_reattach_helper(script_path: Path) -> None:
+    script_path.write_text(
+        """import json
+import sys
+from pathlib import Path
+
+payload_path = Path(sys.argv[1]).resolve()
+payload = json.loads(payload_path.read_text(encoding="utf-8"))
+marker = payload_path.with_suffix('.attached.txt')
+marker.write_text(payload.get('session_key', ''), encoding='utf-8')
+""",
+        encoding="utf-8",
+    )
+
+
+def write_fake_openclaw_cli(cli_dir: Path) -> Path:
+    cli_dir.mkdir(parents=True, exist_ok=True)
+    handler = cli_dir / "openclaw_handler.py"
+    handler.write_text(
+        """import json
+import sys
+from pathlib import Path
+
+
+argv = sys.argv[1:]
+if len(argv) >= 3 and argv[0] == "parent-attach" and argv[1] == "--payload-file":
+    payload = Path(argv[2]).resolve()
+    data = json.loads(payload.read_text(encoding="utf-8"))
+    payload.with_suffix(".cli-attached.txt").write_text(data.get("session_key", ""), encoding="utf-8")
+    raise SystemExit(0)
+if len(argv) >= 3 and argv[0] == "session" and argv[1] == "close":
+    if argv[2] == "--payload-file" and len(argv) >= 4:
+        payload = Path(argv[3]).resolve()
+        data = json.loads(payload.read_text(encoding="utf-8"))
+        payload.with_suffix(".cli-closed.txt").write_text(data.get("session_key", ""), encoding="utf-8")
+        raise SystemExit(0)
+    if argv[2] == "--session-key" and len(argv) >= 4:
+        marker = Path.cwd() / "session-close-cli-marker.txt"
+        marker.write_text(argv[3], encoding="utf-8")
+        raise SystemExit(0)
+raise SystemExit(1)
+""",
+        encoding="utf-8",
+    )
+    command = cli_dir / "openclaw.cmd"
+    command.write_text(f'@"{sys.executable}" "{handler}" %*\n', encoding="utf-8")
+    return command
 
 
 class GovernanceScriptRegressionTests(unittest.TestCase):
@@ -52,8 +169,83 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertTrue((project_root / "ai" / "handoff" / "orchestrator" / "active" / "TAKEOVER-ASSESSMENT.md").exists())
             self.assertTrue((project_root / "ai" / "tools" / "run_project_guard.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "render_agent_repair_brief.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "build_dispatch_payload.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "recovery_summary.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "automation_control.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "change_request_control.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "close_session.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "natural_language_control.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "replan_change_request.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "provider_evidence.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "host_interface_probe.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "runtime_environment.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "environment_bootstrap.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "openclaw_runtime_bridge.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "repo_command_detector.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "evidence_collector.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "escalation_manager.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "parent_session_recovery.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "inbox_watcher.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "orchestrator_local_steps.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "run_orchestrator.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "runtime_loop.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "project_intake.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "configure_review_controls.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "resume_customer_decision.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "session_registry.py").exists())
             self.assertTrue((project_root / ".github" / "workflows" / "project-guard.yml").exists())
             self.assertTrue((project_root / ".github" / "workflows" / "project-repair-brief.yml").exists())
+            self.assertTrue((project_root / "docs" / "requirement-communication-template.md").exists())
+            self.assertTrue((project_root / "ai" / "state" / "review-controls.json").exists())
+            doc_index = (project_root / "ai" / "state" / "doc-index.md").read_text(encoding="utf-8")
+            self.assertIn("docs/requirement-communication-template.md", doc_index)
+            self.assertIn("ai/state/review-controls.json", doc_index)
+            runtime_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(project_root / "ai" / "tools" / "run_orchestrator.py"),
+                    str(project_root),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(runtime_result.returncode, 0, runtime_result.stderr)
+            rollover_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(project_root / "ai" / "tools" / "context_rollover.py"),
+                    str(project_root),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(rollover_result.returncode, 0, rollover_result.stderr)
+            loop_result = subprocess.run(
+                [
+                    sys.executable,
+                    str(project_root / "ai" / "tools" / "runtime_loop.py"),
+                    str(project_root),
+                    "--max-cycles",
+                    "1",
+                    "--max-dispatch",
+                    "1",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(loop_result.returncode, 0)
+            self.assertEqual(json.loads(loop_result.stdout)["status"], "control-blocked")
+            self.assertEqual(
+                (project_root / "ai" / "tools" / "validate_state.py").read_text(encoding="utf-8"),
+                (SCRIPTS_DIR / "validate_state.py").read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                (project_root / "ai" / "tools" / "run_project_guard.py").read_text(encoding="utf-8"),
+                (SCRIPTS_DIR / "run_project_guard.py").read_text(encoding="utf-8"),
+            )
 
     def test_build_dispatch_payload_creates_handoff_stub_and_delete_cleanup(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -115,6 +307,2362 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(payload["agentId"], "libu2")
             self.assertEqual(payload["cleanup"], "delete")
             self.assertTrue((project_root / "ai" / "handoff" / "libu2" / "active" / "FEAT-001.md").exists())
+
+    def test_session_registry_backfills_orchestrator_runtime_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"libu2": {"agent_id": "libu2", "status": "active", "last_step_id": "libu2-implementation"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = session_registry.ensure_registry_schema(project_root)
+            self.assertIn("orchestrator", payload)
+            self.assertEqual(payload["libu2"]["last_step_id"], "libu2-implementation")
+            self.assertIn("resume_prompt", payload["orchestrator"])
+
+    def test_workflow_engine_returns_parallel_ready_steps_after_plan_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "workflow_progress": {"completed_steps": ["intake-feature", "confirm-or-replan", "plan-approval"]},
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            workflow = workflow_engine.load_workflow(project_root)
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            ready = [step.id for step in workflow_engine.ready_steps(workflow, state)]
+            self.assertEqual(ready[:3], ["libu2-implementation", "hubu-implementation", "gongbu-implementation"])
+
+    def test_workflow_engine_returns_cross_review_steps_after_implementation_batch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "workflow_progress": {
+                            "completed_steps": [
+                                "intake-feature",
+                                "confirm-or-replan",
+                                "plan-approval",
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                            ]
+                        },
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            workflow = workflow_engine.load_workflow(project_root)
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            ready = [step.id for step in workflow_engine.ready_steps(workflow, state)]
+            self.assertEqual(
+                ready[:7],
+                [
+                    "libu2-cross-review",
+                    "hubu-cross-review",
+                    "gongbu-cross-review",
+                    "bingbu-cross-review",
+                    "libu-cross-review",
+                    "xingbu-cross-review",
+                    "duchayuan-cross-review",
+                ],
+            )
+
+    def test_run_orchestrator_writes_dispatch_plan_and_outbox(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "workflow_progress": {"completed_steps": ["intake-feature", "confirm-or-replan", "plan-approval"]},
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            result = run_orchestrator.run(project_root, max_dispatch=2, transport="outbox")
+            self.assertEqual(result["status"], "dispatched")
+            self.assertEqual(result["dispatch_count"], 2)
+            self.assertTrue((project_root / "ai" / "reports" / "orchestrator-dispatch-plan.md").exists())
+            outbox_items = list((project_root / "ai" / "runtime" / "outbox").glob("*.json"))
+            self.assertEqual(len(outbox_items), 2)
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(state["active_tasks"]), 2)
+
+    def test_run_orchestrator_executes_local_orchestrator_steps_without_outbox(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            result = run_orchestrator.run(project_root, max_dispatch=1, transport="outbox")
+            self.assertEqual(result["status"], "local-progress")
+            self.assertEqual(result["dispatch_count"], 0)
+            self.assertEqual(result["local_completion_count"], 1)
+            self.assertEqual(result["dispatches"][0]["status"], "local-completed")
+            self.assertEqual(len(list((project_root / "ai" / "runtime" / "outbox").glob("*.json"))), 0)
+
+            state = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertIn("identify-project", state["workflow_progress"]["completed_steps"])
+            self.assertTrue((project_root / "ai" / "reports" / "project-inspection.json").exists())
+
+    def test_run_orchestrator_executes_resume_recovery_steps_locally(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "resume-orchestrator",
+                        "current_phase": "recovery",
+                        "current_status": "paused",
+                        "next_owner": "orchestrator",
+                        "workflow_progress": {"completed_steps": [], "blocked_steps": [], "dispatched_steps": []},
+                        "active_tasks": [],
+                        "execution_allowed": True,
+                        "testing_allowed": False,
+                        "release_allowed": False,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            (state_dir / "project-meta.json").write_text(
+                json.dumps({"project_name": "demo", "project_id": "demo"}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n## Completed\n\n- none\n\n## In Progress\n\n- none\n\n## Blocked\n\n- none\n",
+                encoding="utf-8",
+            )
+            (workflows_dir / "resume-orchestrator.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "resume-orchestrator.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            for _ in range(5):
+                result = run_orchestrator.run(project_root, max_dispatch=1, transport="outbox")
+                self.assertEqual(result["status"], "local-progress")
+                self.assertEqual(result["dispatch_count"], 0)
+                self.assertEqual(result["local_completion_count"], 1)
+
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                state["workflow_progress"]["completed_steps"],
+                [
+                    "read-recovery-entry",
+                    "read-latest-reports",
+                    "read-active-handoffs",
+                    "produce-recovery-summary",
+                    "update-state-and-handoff",
+                ],
+            )
+            self.assertEqual(state["current_workflow"], "resume-orchestrator")
+            self.assertEqual(state["current_status"], "paused")
+            self.assertIn("recovery summary", state["next_action"].lower())
+            self.assertEqual(len(list((project_root / "ai" / "runtime" / "outbox").glob("*.json"))), 0)
+            self.assertTrue((reports_dir / "recovery-summary.md").exists())
+
+    def test_automation_control_pause_records_state_sessions_and_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            state_path = project_root / "ai" / "state" / "orchestrator-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["active_tasks"] = [
+                {
+                    "task_id": "LIBU2-1",
+                    "role": "libu2",
+                    "status": "in-progress",
+                    "handoff_path": "ai/handoff/libu2/active/LIBU2-1.md",
+                    "workflow_step_id": "libu2-implementation",
+                }
+            ]
+            state["next_action"] = "Continue libu2 implementation."
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            (project_root / "ai" / "state" / "agent-sessions.json").write_text(
+                json.dumps(
+                    {
+                        "orchestrator": {"agent_id": "orchestrator", "status": "active", "session_key": "sess-orch"},
+                        "libu2": {"agent_id": "libu2", "status": "active", "session_key": "sess-libu2"},
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = automation_control.set_mode(
+                project_root,
+                "paused",
+                actor="user",
+                reason="Need clarification from the parent thread.",
+            )
+
+            self.assertEqual(payload["automation_mode"], "paused")
+            updated_state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(updated_state["automation_mode"], "paused")
+            self.assertEqual(updated_state["pause_reason"], "Need clarification from the parent thread.")
+            self.assertEqual(updated_state["active_tasks"][0]["status"], "paused")
+            registry = json.loads((project_root / "ai" / "state" / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["orchestrator"]["status"], "paused")
+            self.assertEqual(registry["libu2"]["status"], "paused")
+            self.assertTrue((project_root / "ai" / "reports" / "automation-control.md").exists())
+            self.assertTrue((project_root / "ai" / "reports" / "pause-report.md").exists())
+            handoff = (project_root / "ai" / "state" / "project-handoff.md").read_text(encoding="utf-8")
+            self.assertIn("- Automation mode: paused", handoff)
+
+    def test_automation_control_preserves_invalid_state_file_instead_of_overwriting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            state_path = state_dir / "orchestrator-state.json"
+            state_path.write_text("{invalid json", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "invalid JSON"):
+                automation_control.ensure_control_state(project_root)
+
+            backups = list(state_dir.glob("orchestrator-state.json.corrupt-*.bak"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(state_path.read_text(encoding="utf-8"), "{invalid json")
+
+    def test_runtime_loop_requires_autonomous_mode_but_can_activate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            blocked = runtime_loop.run_loop(project_root, max_cycles=1, max_dispatch=1, transport="outbox")
+            self.assertEqual(blocked["status"], "control-blocked")
+            self.assertEqual(blocked["automation_mode"], "normal")
+
+            activated = runtime_loop.run_loop(
+                project_root,
+                max_cycles=1,
+                max_dispatch=1,
+                transport="outbox",
+                activate=True,
+                actor="user",
+                activation_reason="Enter autonomous mode.",
+            )
+            self.assertNotEqual(activated["status"], "control-blocked")
+            state = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["automation_mode"], "autonomous")
+
+    def test_runtime_loop_cli_exits_non_zero_for_control_blocked_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "runtime_loop.py"),
+                    str(project_root),
+                    "--max-cycles",
+                    "1",
+                    "--max-dispatch",
+                    "1",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["status"], "control-blocked")
+
+    def test_natural_language_control_enters_and_pauses_automation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            entered = natural_language_control.execute_request(
+                project_root,
+                "司礼监：进入自动模式",
+                actor="user",
+                max_cycles=1,
+                max_dispatch=1,
+            )
+            self.assertEqual(entered["intent"], "autonomous")
+            self.assertEqual(entered["control"]["automation_mode"], "autonomous")
+            self.assertIn("runtime_loop", entered)
+
+            paused = natural_language_control.execute_request(project_root, "司礼监：暂停自动推进", actor="user")
+            self.assertEqual(paused["intent"], "pause")
+            self.assertEqual(paused["control"]["automation_mode"], "paused")
+
+            status = natural_language_control.execute_request(project_root, "司礼监：查看当前模式", actor="user")
+            self.assertEqual(status["intent"], "status")
+            self.assertEqual(status["control"]["automation_mode"], "paused")
+
+    def test_natural_language_control_routes_change_request_with_fixed_prefix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            automation_control.set_mode(project_root, "autonomous", actor="user", reason="Start autonomous loop")
+
+            payload = natural_language_control.execute_request(
+                project_root,
+                "司礼监：把数据库表结构和登录权限流程一起改掉，并补一轮迁移脚本",
+                actor="user",
+            )
+            self.assertEqual(payload["intent"], "change_request")
+            self.assertIn("change_request", payload)
+            self.assertTrue(payload["change_request"]["requires_replan"])
+            self.assertEqual(payload["control"]["automation_mode"], "paused")
+
+    def test_natural_language_control_detects_close_session_variants(self):
+        self.assertEqual(natural_language_control.classify_request("司礼监：关闭 libu2 当前会话"), "close_session")
+        self.assertEqual(natural_language_control.classify_request("orchestrator: close libu2 current session"), "close_session")
+
+    def test_change_request_control_records_request_and_pauses_for_significant_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            automation_control.set_mode(project_root, "autonomous", actor="user", reason="Start autonomous loop")
+
+            payload = change_request_control.apply_change_request(
+                project_root,
+                "把数据库表结构和登录权限流程一起改掉，并补一轮迁移脚本",
+                actor="user",
+            )
+
+            self.assertEqual(payload["significance"], "significant")
+            self.assertTrue(payload["requires_replan"])
+            self.assertTrue(payload["automation_paused"])
+            state = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["last_change_request_id"], payload["request_id"])
+            self.assertTrue(state["pending_change_requests"])
+            self.assertEqual(state["current_phase"], "planning")
+            self.assertIn(state["current_status"], {"rework", "redesign"})
+            self.assertFalse(state["execution_allowed"])
+            requirements = (project_root / "ai" / "state" / "requirements-pool.md").read_text(encoding="utf-8")
+            self.assertIn(payload["request_id"], requirements)
+            task_tree = json.loads((project_root / "ai" / "state" / "task-tree.json").read_text(encoding="utf-8"))
+            self.assertEqual(task_tree["change_requests"][0]["request_id"], payload["request_id"])
+            self.assertEqual(task_tree["change_requests"][0]["status"], "replan-required")
+            self.assertTrue(payload["replan_packet"])
+            self.assertEqual(payload["replan_packet"]["request_id"], payload["request_id"])
+            self.assertTrue((project_root / "ai" / "reports" / f"replan-{payload['request_id'].lower()}.md").exists())
+            control = automation_control.current_status(project_root)
+            self.assertEqual(control["automation_mode"], "paused")
+
+    def test_openclaw_adapter_drains_outbox_and_archives_sent_envelopes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            helper = Path(tmp) / "transport_helper.py"
+            project_root.mkdir(parents=True)
+            write_transport_helper(helper)
+
+            openclaw_adapter.dispatch_payload(
+                project_root,
+                {"task": "[libu2 task]\\n- task_id: LIBU2-1\\n- workflow_step_id: libu2-implementation\\n"},
+                "spawn",
+                "libu2",
+                transport="outbox",
+            )
+
+            with mock.patch.dict(os.environ, {"OPENCLAW_SPAWN_COMMAND": f'"{sys.executable}" "{helper}" "{{dispatch_file}}"'}):
+                result = openclaw_adapter.deliver_outbox(project_root)
+
+            self.assertEqual(result["attempted_count"], 1)
+            self.assertEqual(result["sent_count"], 1)
+            self.assertEqual(result["failed_count"], 0)
+            self.assertEqual(len(list((project_root / "ai" / "runtime" / "outbox").glob("*.json"))), 0)
+            sent_items = list((project_root / "ai" / "runtime" / "outbox" / "sent").glob("*.json"))
+            self.assertEqual(len(sent_items), 1)
+            inbox_items = list((project_root / "ai" / "runtime" / "inbox").glob("*.json"))
+            self.assertEqual(len(inbox_items), 1)
+
+    def test_repo_command_detector_prefers_package_scripts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            project_root.mkdir(parents=True)
+            (project_root / "package.json").write_text(
+                json.dumps({"scripts": {"lint": "eslint .", "build": "tsc -b", "test": "vitest run"}}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (project_root / "pnpm-lock.yaml").write_text("lockfileVersion: 9\n", encoding="utf-8")
+
+            summary = repo_command_detector.command_summary(project_root)
+            self.assertEqual(summary["commands"]["lint"], "pnpm run lint")
+            self.assertEqual(summary["commands"]["build"], "pnpm run build")
+            self.assertEqual(summary["commands"]["test"], "pnpm run test")
+
+    def test_repo_command_detector_detects_ci_release_and_rollback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            scripts_dir = project_root / "scripts"
+            workflows_dir = project_root / ".github" / "workflows"
+            scripts_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+            (scripts_dir / "run_repo_ci.py").write_text("print('ci')\n", encoding="utf-8")
+            (scripts_dir / "release.py").write_text("print('release')\n", encoding="utf-8")
+            (scripts_dir / "rollback.py").write_text("print('rollback')\n", encoding="utf-8")
+            (workflows_dir / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+
+            summary = repo_command_detector.command_summary(project_root)
+            self.assertIn("run_repo_ci.py", summary["commands"]["ci"])
+            self.assertIn("release.py", summary["commands"]["release"])
+            self.assertIn("rollback.py", summary["commands"]["rollback"])
+
+    def test_evidence_collector_writes_reports_for_python_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            tests_dir = project_root / "tests"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            tests_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "testing",
+                        "current_status": "testing",
+                        "release_allowed": False,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text("# START_HERE\n", encoding="utf-8")
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (tests_dir / "test_sample.py").write_text(
+                "import unittest\n\nclass Smoke(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\n",
+                encoding="utf-8",
+            )
+
+            summary = evidence_collector.collect_evidence(project_root, force=True)
+            self.assertEqual(summary["status"], "collected")
+            self.assertEqual(summary["test"]["status"], "PASS")
+            self.assertEqual(summary["build"]["status"], "PASS")
+            self.assertTrue((reports_dir / "test-report.md").exists())
+            self.assertTrue((reports_dir / "gate-report.md").exists())
+            self.assertIn("- YES", (reports_dir / "test-report.md").read_text(encoding="utf-8"))
+            self.assertIn("mainline regression passed: YES", (reports_dir / "gate-report.md").read_text(encoding="utf-8"))
+
+    def test_evidence_collector_detects_ci_release_and_rollback_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            scripts_dir = project_root / "scripts"
+            state_dir.mkdir(parents=True)
+            scripts_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "review-and-release",
+                        "current_phase": "final-audit",
+                        "current_status": "accepted",
+                        "release_allowed": True,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text("# START_HERE\n", encoding="utf-8")
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (scripts_dir / "run_repo_ci.py").write_text("print('ci ok')\n", encoding="utf-8")
+            (scripts_dir / "release.py").write_text("print('release ok')\n", encoding="utf-8")
+            (scripts_dir / "rollback.py").write_text("print('rollback ok')\n", encoding="utf-8")
+
+            with mock.patch.dict(
+                os.environ,
+                {"SILIJIAN_RUN_RELEASE_VERIFICATION": "1", "SILIJIAN_RUN_ROLLBACK_VERIFICATION": "1"},
+            ):
+                summary = evidence_collector.collect_evidence(project_root, force=True)
+
+            self.assertEqual(summary["ci"]["status"], "PASS")
+            self.assertEqual(summary["release"]["status"], "PASS")
+            self.assertEqual(summary["rollback"]["status"], "PASS")
+
+    def test_provider_evidence_reads_json_backed_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            reports_dir = project_root / "ai" / "reports"
+            reports_dir.mkdir(parents=True)
+            ci_json = Path(tmp) / "ci-provider.json"
+            release_json = Path(tmp) / "release-provider.json"
+            rollback_json = Path(tmp) / "rollback-provider.json"
+            ci_json.write_text(
+                json.dumps({"provider": "github-actions", "status": "success", "summary": "CI green", "url": "https://ci"}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            release_json.write_text(
+                json.dumps({"provider": "deploy-provider", "status": "failed", "summary": "Release blocked"}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            rollback_json.write_text(
+                json.dumps({"provider": "deploy-provider", "status": "pending", "summary": "Rollback staged"}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "SILIJIAN_CI_PROVIDER_JSON": str(ci_json),
+                    "SILIJIAN_RELEASE_PROVIDER_JSON": str(release_json),
+                    "SILIJIAN_ROLLBACK_PROVIDER_JSON": str(rollback_json),
+                },
+                clear=False,
+            ):
+                summary = provider_evidence.collect_provider_evidence(project_root)
+
+            self.assertEqual(summary["results"]["ci"]["status"], "PASS")
+            self.assertEqual(summary["results"]["release"]["status"], "FAIL")
+            self.assertEqual(summary["results"]["rollback"]["status"], "PASS_WITH_WARNING")
+            self.assertTrue((reports_dir / "provider-evidence-summary.json").exists())
+
+    def test_evidence_collector_prefers_provider_results_over_local_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            tests_dir = project_root / "tests"
+            scripts_dir = project_root / "scripts"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            tests_dir.mkdir(parents=True)
+            scripts_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "final-audit",
+                        "current_status": "final-audit",
+                        "release_allowed": True,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text("# START_HERE\n", encoding="utf-8")
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (tests_dir / "test_sample.py").write_text(
+                "import unittest\n\nclass Sample(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\n",
+                encoding="utf-8",
+            )
+            (scripts_dir / "run_repo_ci.py").write_text("raise SystemExit(1)\n", encoding="utf-8")
+            (scripts_dir / "release.py").write_text("raise SystemExit(1)\n", encoding="utf-8")
+            (scripts_dir / "rollback.py").write_text("raise SystemExit(1)\n", encoding="utf-8")
+
+            ci_json = Path(tmp) / "ci-provider.json"
+            release_json = Path(tmp) / "release-provider.json"
+            rollback_json = Path(tmp) / "rollback-provider.json"
+            ci_json.write_text(json.dumps({"provider": "github-actions", "status": "success", "summary": "Provider CI ok"}) + "\n", encoding="utf-8")
+            release_json.write_text(json.dumps({"provider": "deploy-provider", "status": "success", "summary": "Provider release ok"}) + "\n", encoding="utf-8")
+            rollback_json.write_text(json.dumps({"provider": "deploy-provider", "status": "success", "summary": "Provider rollback ok"}) + "\n", encoding="utf-8")
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "SILIJIAN_CI_PROVIDER_JSON": str(ci_json),
+                    "SILIJIAN_RELEASE_PROVIDER_JSON": str(release_json),
+                    "SILIJIAN_ROLLBACK_PROVIDER_JSON": str(rollback_json),
+                    "SILIJIAN_RUN_RELEASE_VERIFICATION": "1",
+                    "SILIJIAN_RUN_ROLLBACK_VERIFICATION": "1",
+                },
+                clear=False,
+            ):
+                summary = evidence_collector.collect_evidence(project_root, force=True)
+
+            self.assertEqual(summary["ci"]["status"], "PASS")
+            self.assertEqual(summary["ci"]["source"], "json-file")
+            self.assertEqual(summary["release"]["status"], "PASS")
+            self.assertEqual(summary["rollback"]["status"], "PASS")
+            self.assertEqual(summary["recommendation"], "PASS_WITH_WARNING")
+            gate_report = (reports_dir / "gate-report.md").read_text(encoding="utf-8")
+            self.assertIn("provider ci source: json-file", gate_report)
+            gate_text = (project_root / "ai" / "reports" / "gate-report.md").read_text(encoding="utf-8")
+            self.assertIn("- ci check: PASS", gate_text)
+            self.assertIn("- rollback point available: YES", gate_text)
+
+    def test_evidence_collector_skipped_tests_do_not_fake_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "testing",
+                        "current_status": "testing",
+                        "release_allowed": False,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text("# START_HERE\n", encoding="utf-8")
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+
+            summary = evidence_collector.collect_evidence(project_root, force=True)
+
+            self.assertEqual(summary["test"]["status"], "SKIPPED")
+            report = (reports_dir / "test-report.md").read_text(encoding="utf-8")
+            self.assertIn("- passed: 0", report)
+            self.assertIn("- failed: 0", report)
+            self.assertIn("- skipped: 0", report)
+            self.assertIn("- PASS_WITH_WARNING", report)
+
+    def test_evidence_collector_blocks_failed_provider_release_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            tests_dir = project_root / "tests"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            tests_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "review-and-release",
+                        "current_phase": "final-audit",
+                        "current_status": "accepted",
+                        "release_allowed": True,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text("# START_HERE\n", encoding="utf-8")
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (tests_dir / "test_sample.py").write_text(
+                "import unittest\n\nclass ReleaseSmoke(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\n",
+                encoding="utf-8",
+            )
+
+            release_json = Path(tmp) / "release-provider.json"
+            release_json.write_text(
+                json.dumps({"provider": "deploy-provider", "status": "failed", "summary": "Release blocked"}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {"SILIJIAN_RELEASE_PROVIDER_JSON": str(release_json)},
+                clear=False,
+            ):
+                summary = evidence_collector.collect_evidence(project_root, force=True)
+
+            self.assertEqual(summary["release"]["status"], "FAIL")
+            self.assertEqual(summary["recommendation"], "BLOCKER")
+            report = (reports_dir / "test-report.md").read_text(encoding="utf-8")
+            self.assertIn("- BLOCKER", report)
+            self.assertIn("- NO", report)
+            gate_report = (reports_dir / "gate-report.md").read_text(encoding="utf-8")
+            self.assertIn("- release verification: FAIL", gate_report)
+
+    def test_run_orchestrator_does_not_mark_steps_active_when_command_transport_is_unconfigured(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "workflow_progress": {"completed_steps": ["intake-feature", "confirm-or-replan", "plan-approval"]},
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            result = run_orchestrator.run(project_root, max_dispatch=1, transport="command")
+            self.assertEqual(result["status"], "pending-transport")
+            self.assertEqual(result["dispatch_count"], 0)
+            self.assertEqual(result["attempted_dispatch_count"], 1)
+            self.assertEqual(result["dispatches"][0]["status"], "queued-awaiting-command-config")
+
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["active_tasks"], [])
+            self.assertEqual(state["workflow_progress"]["dispatched_steps"], [])
+            self.assertIn("Fix the transport", state["next_action"])
+
+    def test_inbox_watcher_processes_payloads_and_archives_processed_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            inbox_dir = project_root / "ai" / "runtime" / "inbox"
+            state_dir.mkdir(parents=True)
+            inbox_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2_IMPLEMENTATION-1",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/libu2/active/LIBU2_IMPLEMENTATION-1.md",
+                                "workflow_step_id": "libu2-implementation",
+                            }
+                        ],
+                        "workflow_progress": {"completed_steps": ["plan-approval"], "blocked_steps": [], "dispatched_steps": ["libu2-implementation"]},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            (inbox_dir / "completion.json").write_text(
+                json.dumps(
+                    {
+                        "agent_id": "libu2",
+                        "task_id": "LIBU2_IMPLEMENTATION-1",
+                        "workflow_step_id": "libu2-implementation",
+                        "status": "completed",
+                        "summary": "Processed from inbox.",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = inbox_watcher.process_inbox(project_root)
+            self.assertEqual(result["processed_count"], 1)
+            self.assertEqual(result["failed_count"], 0)
+            self.assertEqual(len(list(inbox_dir.glob("*.json"))), 0)
+            self.assertTrue((inbox_dir / "processed" / "completion.json").exists())
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["active_tasks"], [])
+            self.assertIn("libu2-implementation", state["workflow_progress"]["completed_steps"])
+
+    def test_completion_consumer_marks_step_complete_and_updates_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2_IMPLEMENTATION-1",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/libu2/active/LIBU2_IMPLEMENTATION-1.md",
+                                "workflow_step_id": "libu2-implementation",
+                            }
+                        ],
+                        "workflow_progress": {"completed_steps": ["plan-approval"], "blocked_steps": [], "dispatched_steps": ["libu2-implementation"]},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            result = completion_consumer.consume_completion(
+                project_root,
+                {
+                    "agent_id": "libu2",
+                    "task_id": "LIBU2_IMPLEMENTATION-1",
+                    "workflow_step_id": "libu2-implementation",
+                    "status": "completed",
+                    "summary": "Backend implementation finished.",
+                    "files_touched": ["src/api/user.ts"],
+                    "session_key": "session-libu2",
+                },
+            )
+            self.assertEqual(result["status"], "completed")
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["active_tasks"], [])
+            self.assertIn("libu2-implementation", state["workflow_progress"]["completed_steps"])
+            registry = json.loads((state_dir / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["libu2"]["status"], "idle")
+            self.assertTrue((project_root / "ai" / "handoff" / "libu2" / "active" / "LIBU2_IMPLEMENTATION-1.md").exists())
+
+    def test_completion_consumer_rejects_untracked_peer_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "active_tasks": [],
+                        "workflow_progress": {"completed_steps": [], "blocked_steps": [], "dispatched_steps": []},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "does not match any active task"):
+                completion_consumer.consume_completion(
+                    project_root,
+                    {
+                        "agent_id": "libu2",
+                        "task_id": "FAKE-1",
+                        "workflow_step_id": "final-audit",
+                        "status": "completed",
+                    },
+                )
+
+    def test_completion_consumer_keeps_other_active_blockers_after_successful_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_status": "blocked",
+                        "active_tasks": [
+                            {
+                                "task_id": "HUBU-1",
+                                "role": "hubu",
+                                "status": "blocked",
+                                "handoff_path": "ai/handoff/hubu/active/HUBU-1.md",
+                                "workflow_step_id": "hubu-implementation",
+                                "blockers": ["schema drift"],
+                            },
+                            {
+                                "task_id": "LIBU2-1",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/libu2/active/LIBU2-1.md",
+                                "workflow_step_id": "libu2-implementation",
+                            },
+                        ],
+                        "workflow_progress": {
+                            "completed_steps": ["intake-feature", "confirm-or-replan", "plan-approval"],
+                            "blocked_steps": ["hubu-implementation"],
+                            "dispatched_steps": ["libu2-implementation"],
+                        },
+                        "blockers": ["schema drift"],
+                        "blocker_level": "high",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            result = completion_consumer.consume_completion(
+                project_root,
+                {
+                    "agent_id": "libu2",
+                    "task_id": "LIBU2-1",
+                    "workflow_step_id": "libu2-implementation",
+                    "status": "completed",
+                    "summary": "libu2 done",
+                },
+            )
+
+            self.assertEqual(result["status"], "completed")
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["current_status"], "blocked")
+            self.assertEqual(state["blockers"], ["schema drift"])
+            self.assertEqual(state["blocker_level"], "high")
+            self.assertEqual(len(state["active_tasks"]), 1)
+            self.assertEqual(state["active_tasks"][0]["task_id"], "HUBU-1")
+
+    def test_completion_consumer_restores_previous_status_after_last_blocker_clears(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "executing",
+                        "current_status": "blocked",
+                        "status_before_blocked": "executing",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2-1",
+                                "role": "libu2",
+                                "status": "blocked",
+                                "handoff_path": "ai/handoff/libu2/active/LIBU2-1.md",
+                                "workflow_step_id": "libu2-implementation",
+                                "blockers": ["schema drift"],
+                            }
+                        ],
+                        "workflow_progress": {
+                            "completed_steps": ["plan-approval"],
+                            "blocked_steps": ["libu2-implementation"],
+                            "dispatched_steps": [],
+                        },
+                        "blockers": ["schema drift"],
+                        "blocker_level": "high",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            result = completion_consumer.consume_completion(
+                project_root,
+                {
+                    "agent_id": "libu2",
+                    "task_id": "LIBU2-1",
+                    "workflow_step_id": "libu2-implementation",
+                    "status": "completed",
+                    "summary": "fixed",
+                },
+            )
+
+            self.assertEqual(result["status"], "completed")
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["current_status"], "executing")
+            self.assertEqual(state["blockers"], [])
+            self.assertNotIn("status_before_blocked", state)
+
+    def test_completion_consumer_recovers_workflow_step_id_from_active_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2_IMPLEMENTATION-1",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/libu2/active/LIBU2_IMPLEMENTATION-1.md",
+                                "workflow_step_id": "libu2-implementation",
+                            }
+                        ],
+                        "workflow_progress": {
+                            "completed_steps": ["plan-approval"],
+                            "blocked_steps": [],
+                            "dispatched_steps": ["libu2-implementation"],
+                        },
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            result = completion_consumer.consume_completion(
+                project_root,
+                {
+                    "agent_id": "libu2",
+                    "task_id": "LIBU2_IMPLEMENTATION-1",
+                    "status": "completed",
+                    "summary": "Backend implementation finished.",
+                },
+            )
+
+            self.assertEqual(result["workflow_step_id"], "libu2-implementation")
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["active_tasks"], [])
+            self.assertIn("libu2-implementation", state["workflow_progress"]["completed_steps"])
+            self.assertNotIn("libu2-implementation", state["workflow_progress"]["dispatched_steps"])
+
+    def test_completion_consumer_rejects_handoff_path_outside_project_handoff_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "active_tasks": [],
+                        "workflow_progress": {"completed_steps": [], "blocked_steps": [], "dispatched_steps": []},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            escaped_path = project_root.parent / "outside-handoff.md"
+            if escaped_path.exists():
+                escaped_path.unlink()
+
+            with self.assertRaisesRegex(ValueError, "handoff_path escapes ai/handoff root"):
+                completion_consumer.consume_completion(
+                    project_root,
+                    {
+                        "agent_id": "libu2",
+                        "task_id": "TASK-1",
+                        "workflow_step_id": "libu2-implementation",
+                        "status": "completed",
+                        "handoff_path": "../outside-handoff.md",
+                    },
+                )
+
+            self.assertFalse(escaped_path.exists())
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["active_tasks"], [])
+            self.assertEqual(state["workflow_progress"]["completed_steps"], [])
+
+    def test_escalation_manager_writes_report_for_blocked_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_status": "blocked",
+                        "next_owner": "orchestrator",
+                        "blockers": ["ci failing"],
+                        "last_dispatch_batch": {"items": [{"step_id": "bingbu-testing", "status": "failed"}]},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "evidence-summary.json").write_text(
+                json.dumps({"recommendation": "BLOCKER", "blockers": ["test command failed"]}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "inbox-watch-summary.json").write_text(
+                json.dumps({"failed_count": 1}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            payload = escalation_manager.generate_escalation(project_root)
+            self.assertEqual(payload["status"], "escalated")
+            self.assertTrue(payload["items"])
+            self.assertTrue((reports_dir / "escalation-report.md").exists())
+
+    def test_escalation_manager_detects_provider_failure_and_approval_conflict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_status": "department-review",
+                        "next_owner": "duchayuan",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "provider-evidence-summary.json").write_text(
+                json.dumps(
+                    {
+                        "results": {
+                            "ci": {"status": "PASS", "provider": "github-actions", "summary": "green"},
+                            "release": {"status": "FAIL", "provider": "deploy-provider", "summary": "release failed"},
+                            "rollback": {"status": "PASS_WITH_WARNING", "provider": "deploy-provider", "summary": "rollback pending"},
+                        }
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "department-approval-matrix.md").write_text(
+                """# Department Approval Matrix
+
+## Aggregated Issues
+- blockers: none
+- warnings: none
+- suggestions: none
+- conflicts needing arbitration: schema mismatch unresolved
+
+## Reviewer xingbu
+- closure: waiting for sign-off
+""",
+                encoding="utf-8",
+            )
+            (state_dir / "risk-report.md").write_text(
+                "# Risk Report\n\n- HIGH schema migration without confirmed rollback rehearsal\n",
+                encoding="utf-8",
+            )
+
+            payload = escalation_manager.generate_escalation(project_root)
+            joined = "\n".join(payload["items"])
+            self.assertEqual(payload["status"], "escalated")
+            self.assertIn("release provider failure", joined)
+            self.assertIn("approval conflict needs arbitration", joined)
+            self.assertIn("high-risk change noted in risk report", joined)
+            self.assertGreaterEqual(payload["severity_counts"]["error"], 2)
+
+    def test_parent_session_recovery_builds_resume_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_status": "department-review",
+                        "next_owner": "duchayuan",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"orchestrator": {"session_key": "sess-1", "last_step_id": "department-review", "handoff_path": "ai/handoff/orchestrator/active/TASK.md"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "runtime-loop-summary.json").write_text(json.dumps({"status": "escalated"}, indent=2) + "\n", encoding="utf-8")
+            (reports_dir / "escalation-report.json").write_text(json.dumps({"status": "escalated", "items": ["review conflict"]}, indent=2) + "\n", encoding="utf-8")
+
+            payload = parent_session_recovery.build_parent_recovery(project_root)
+            self.assertIn("sess-1", payload["resume_prompt"])
+            self.assertEqual(payload["escalation_status"], "escalated")
+
+    def test_runtime_environment_auto_configures_parent_attach_bridge(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            payload = runtime_environment.ensure_runtime_environment(project_root)
+            config = json.loads((project_root / "ai" / "runtime" / "runtime-config.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(payload["command_source"], "project-config")
+            self.assertIn("openclaw_runtime_bridge.py", config["parent_attach_command"])
+            self.assertIn("parent_attach_command", payload["auto_configured_fields"])
+            self.assertTrue((project_root / "ai" / "reports" / "runtime-environment.json").exists())
+
+    def test_host_interface_probe_reads_machine_visible_commands_into_runtime_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            runtime_dir = project_root / "ai" / "runtime"
+            runtime_dir.mkdir(parents=True)
+            config_file = Path(tmp) / "openclaw-config.json"
+            config_file.write_text(
+                json.dumps(
+                    {
+                        "commands": {
+                            "spawn_command": "spawn-from-config",
+                            "send_command": "send-from-config",
+                        }
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "OPENCLAW_CONFIG_PATH": str(config_file),
+                    "OPENCLAW_PARENT_ATTACH_COMMAND": "attach-from-env",
+                },
+                clear=False,
+            ):
+                probe = host_interface_probe.probe_host_interfaces(project_root)
+                config = host_interface_probe.sync_runtime_config_from_probe(project_root, probe)
+
+            self.assertEqual(probe["selected_commands"]["parent_attach_command"], "attach-from-env")
+            self.assertEqual(probe["selected_commands"]["spawn_command"], "spawn-from-config")
+            self.assertEqual(config["parent_attach_command"], "attach-from-env")
+            self.assertEqual(config["spawn_command"], "spawn-from-config")
+            self.assertEqual(config["send_command"], "send-from-config")
+            self.assertTrue((project_root / "ai" / "reports" / "host-interface-probe.json").exists())
+
+    def test_environment_bootstrap_installs_python_requirements(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            (project_root / "requirements.txt").write_text("requests==2.0.0\n", encoding="utf-8")
+
+            calls: list[str] = []
+
+            def fake_run(command, cwd=None, capture_output=None, text=None, shell=None, check=None):
+                calls.append(str(command))
+                return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+            with mock.patch("environment_bootstrap.subprocess.run", side_effect=fake_run):
+                payload = environment_bootstrap.ensure_environment(project_root, apply=True, include_system_tools=False)
+
+            self.assertIn(payload["status"], {"tooling-pending", "runtime-blocked"})
+            self.assertTrue(any("pip install -r" in call for call in calls))
+            self.assertEqual(payload["dependency_actions"][0]["status"], "completed")
+            self.assertTrue((project_root / "ai" / "reports" / "environment-bootstrap.json").exists())
+
+    def test_openclaw_adapter_uses_runtime_config_command_when_env_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            helper = Path(tmp) / "transport_helper.py"
+            write_transport_helper(helper)
+            runtime_dir = project_root / "ai" / "runtime"
+            runtime_dir.mkdir(parents=True)
+            (runtime_dir / "runtime-config.json").write_text(
+                json.dumps(
+                    {
+                        "spawn_command": f'"{sys.executable}" "{helper}" "{{dispatch_file}}"',
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(os.environ, {"OPENCLAW_SPAWN_COMMAND": ""}, clear=False):
+                envelope = openclaw_adapter.dispatch_payload(
+                    project_root,
+                    {"task": "demo"},
+                    "spawn",
+                    "libu2",
+                    transport="command",
+                )
+
+            self.assertEqual(envelope["status"], "sent")
+            inbox_items = list((project_root / "ai" / "runtime" / "inbox").glob("*.json"))
+            self.assertEqual(len(inbox_items), 1)
+
+    def test_openclaw_adapter_generates_unique_dispatch_ids_for_same_agent_same_second(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+
+            first = openclaw_adapter.dispatch_payload(project_root, {"task": "demo-1"}, "spawn", "libu2", transport="outbox")
+            second = openclaw_adapter.dispatch_payload(project_root, {"task": "demo-2"}, "spawn", "libu2", transport="outbox")
+
+            self.assertNotEqual(first["dispatch_id"], second["dispatch_id"])
+            outbox_items = list((project_root / "ai" / "runtime" / "outbox").glob("*.json"))
+            self.assertEqual(len(outbox_items), 2)
+
+    def test_session_registry_reuses_only_same_workflow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            (project_root / "ai" / "state").mkdir(parents=True)
+
+            session_registry.upsert_session(
+                project_root,
+                "libu2",
+                session_key="sess-libu2",
+                status="active",
+                active_workflow="takeover-project",
+            )
+
+            self.assertIsNone(session_registry.reusable_session_key(project_root, "libu2", workflow_name="feature-delivery"))
+            self.assertEqual(
+                session_registry.reusable_session_key(project_root, "libu2", workflow_name="takeover-project"),
+                "sess-libu2",
+            )
+
+    def test_environment_bootstrap_reports_missing_system_tool_installers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            workflows_dir = project_root / ".github" / "workflows"
+            workflows_dir.mkdir(parents=True, exist_ok=True)
+            (workflows_dir / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+
+            with mock.patch("environment_bootstrap.executable_available", side_effect=lambda name: False if name == "gh" else True):
+                payload = environment_bootstrap.ensure_environment(project_root, apply=False, include_system_tools=True)
+
+            self.assertIn("gh", payload["missing_system_tools"])
+            gh_entry = next(item for item in payload["system_tool_actions"] if item["tool"] == "gh")
+            self.assertEqual(gh_entry["status"], "blocked")
+            self.assertIn("No install command configured", gh_entry["blocked_reason"])
+
+    def test_environment_bootstrap_reuses_cached_dependency_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            (project_root / "requirements.txt").write_text("requests==2.0.0\n", encoding="utf-8")
+
+            with mock.patch(
+                "environment_bootstrap.run_action",
+                return_value={"command": "pip", "returncode": 0, "stdout": "ok", "stderr": "", "status": "completed"},
+            ) as first_run:
+                first = environment_bootstrap.ensure_environment(project_root, apply=True, include_system_tools=False)
+
+            self.assertEqual(first["dependency_actions"][0]["status"], "completed")
+            self.assertEqual(first_run.call_count, 1)
+
+            with mock.patch("environment_bootstrap.run_action") as second_run:
+                second = environment_bootstrap.ensure_environment(project_root, apply=True, include_system_tools=False)
+
+            self.assertEqual(second["dependency_actions"][0]["status"], "cached")
+            second_run.assert_not_called()
+
+    def test_parent_session_recovery_attempts_reattach_when_command_is_configured(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            helper = Path(tmp) / "reattach_helper.py"
+            write_reattach_helper(helper)
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"current_workflow": "feature-delivery", "current_status": "department-review", "next_owner": "orchestrator"}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"orchestrator": {"session_key": "sess-reattach", "last_step_id": "department-review"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "runtime-loop-summary.json").write_text(json.dumps({"status": "active"}, indent=2) + "\n", encoding="utf-8")
+            (reports_dir / "escalation-report.json").write_text(json.dumps({"status": "clear", "items": []}, indent=2) + "\n", encoding="utf-8")
+
+            payload = parent_session_recovery.build_parent_recovery(project_root)
+            with mock.patch.dict(os.environ, {"OPENCLAW_PARENT_ATTACH_COMMAND": f'"{sys.executable}" "{helper}" "{{payload_file}}"'}):
+                result = parent_session_recovery.attempt_reattach(project_root, payload)
+
+            self.assertEqual(result["status"], "attached")
+            marker = project_root / "ai" / "runtime" / "reattach" / "orchestrator-parent-reattach.attached.txt"
+            self.assertTrue(marker.exists())
+            self.assertEqual(marker.read_text(encoding="utf-8"), "sess-reattach")
+
+    def test_parent_session_recovery_uses_project_runtime_config_when_env_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            helper = Path(tmp) / "reattach_helper.py"
+            write_reattach_helper(helper)
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            runtime_dir = project_root / "ai" / "runtime"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            runtime_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"current_workflow": "feature-delivery", "current_status": "department-review", "automation_mode": "autonomous"}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"orchestrator": {"session_key": "sess-config", "last_step_id": "department-review"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "runtime-loop-summary.json").write_text(json.dumps({"status": "active"}, indent=2) + "\n", encoding="utf-8")
+            (reports_dir / "escalation-report.json").write_text(json.dumps({"status": "clear", "items": []}, indent=2) + "\n", encoding="utf-8")
+            (runtime_dir / "runtime-config.json").write_text(
+                json.dumps(
+                    {
+                        "parent_attach_command": f'"{sys.executable}" "{helper}" "{{payload_file}}"',
+                        "bridge_available": False,
+                        "openclaw_cli_available": False,
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = parent_session_recovery.build_parent_recovery(project_root)
+            with mock.patch.dict(os.environ, {"OPENCLAW_PARENT_ATTACH_COMMAND": ""}, clear=False):
+                result = parent_session_recovery.write_recovery_artifacts(project_root, payload)
+
+            self.assertEqual(result["reattach_status"], "attached")
+            self.assertEqual(result["reattach_attempt"]["command_source"], "project-config")
+
+    def test_parent_session_recovery_auto_attempts_reattach_when_writing_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            helper = Path(tmp) / "reattach_helper.py"
+            write_reattach_helper(helper)
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"current_workflow": "feature-delivery", "current_status": "department-review", "automation_mode": "autonomous"}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"orchestrator": {"session_key": "sess-auto", "last_step_id": "department-review"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "runtime-loop-summary.json").write_text(json.dumps({"status": "active"}, indent=2) + "\n", encoding="utf-8")
+            (reports_dir / "escalation-report.json").write_text(json.dumps({"status": "clear", "items": []}, indent=2) + "\n", encoding="utf-8")
+
+            payload = parent_session_recovery.build_parent_recovery(project_root)
+            with mock.patch.dict(os.environ, {"OPENCLAW_PARENT_ATTACH_COMMAND": f'"{sys.executable}" "{helper}" "{{payload_file}}"'}):
+                result = parent_session_recovery.write_recovery_artifacts(project_root, payload)
+
+            self.assertEqual(result["reattach_status"], "attached")
+            self.assertEqual(result["reattach_attempt"]["status"], "attached")
+            report = json.loads((reports_dir / "parent-session-recovery.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["reattach_status"], "attached")
+
+    def test_parent_session_recovery_skips_duplicate_auto_reattach_for_same_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            helper = Path(tmp) / "reattach_helper.py"
+            write_reattach_helper(helper)
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"current_workflow": "feature-delivery", "current_status": "department-review", "automation_mode": "autonomous"}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"orchestrator": {"session_key": "sess-auto", "last_step_id": "department-review"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "runtime-loop-summary.json").write_text(json.dumps({"status": "active"}, indent=2) + "\n", encoding="utf-8")
+            (reports_dir / "escalation-report.json").write_text(json.dumps({"status": "clear", "items": []}, indent=2) + "\n", encoding="utf-8")
+
+            payload = parent_session_recovery.build_parent_recovery(project_root)
+            with mock.patch.dict(os.environ, {"OPENCLAW_PARENT_ATTACH_COMMAND": f'"{sys.executable}" "{helper}" "{{payload_file}}"'}):
+                first = parent_session_recovery.write_recovery_artifacts(project_root, payload)
+                second = parent_session_recovery.write_recovery_artifacts(project_root, parent_session_recovery.build_parent_recovery(project_root))
+
+            self.assertEqual(first["reattach_status"], "attached")
+            self.assertEqual(second["reattach_status"], "attached")
+            self.assertIn("duplicate attach attempt", second["reattach_attempt"]["blocked_reason"])
+
+    def test_openclaw_runtime_bridge_tries_parent_attach_cli_variants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            payload_path = temp_root / "orchestrator-parent-reattach.json"
+            payload_path.write_text(
+                json.dumps({"session_key": "sess-cli", "resume_prompt": "resume"}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            cli_dir = temp_root / "cli"
+            write_fake_openclaw_cli(cli_dir)
+            env = dict(os.environ)
+            env["PATH"] = str(cli_dir) + os.pathsep + env.get("PATH", "")
+
+            completed = subprocess.run(
+                [sys.executable, str(SCRIPTS_DIR / "openclaw_runtime_bridge.py"), "parent-attach", str(payload_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            report = json.loads(completed.stdout)
+            self.assertEqual(report["status"], "attached")
+            self.assertTrue((payload_path.with_suffix(".cli-attached.txt")).exists())
+
+    def test_close_session_closes_native_session_and_retires_registry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            runtime_dir = project_root / "ai" / "runtime"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            runtime_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            helper = Path(tmp) / "close_helper.py"
+            helper.write_text(
+                """import json
+import sys
+from pathlib import Path
+
+payload = Path(sys.argv[1]).resolve()
+data = json.loads(payload.read_text(encoding='utf-8'))
+payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encoding='utf-8')
+""",
+                encoding="utf-8",
+            )
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_status": "executing",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2-1",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "workflow_step_id": "libu2-implementation",
+                            }
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"libu2": {"agent_id": "libu2", "session_key": "sess-close", "status": "active"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (runtime_dir / "runtime-config.json").write_text(
+                json.dumps(
+                    {
+                        "close_session_command": f'"{sys.executable}" "{helper}" "{{payload_file}}"',
+                        "host_interface_sources": {"close_session_command": "project-config"},
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = close_session.apply_close(project_root, "libu2", "Close for handoff consolidation.", force_native=True)
+
+            self.assertEqual(payload["native_close_status"], "closed")
+            registry = json.loads((state_dir / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["libu2"]["status"], "closed")
+            self.assertIsNone(registry["libu2"]["session_key"])
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["active_tasks"][0]["status"], "closed")
+            self.assertTrue((reports_dir / "session-close-libu2.json").exists())
+
+    def test_natural_language_control_routes_close_session_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            runtime_dir = project_root / "ai" / "runtime"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            runtime_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            helper = Path(tmp) / "close_helper.py"
+            helper.write_text(
+                """import json
+import sys
+from pathlib import Path
+
+payload = Path(sys.argv[1]).resolve()
+data = json.loads(payload.read_text(encoding='utf-8'))
+payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encoding='utf-8')
+""",
+                encoding="utf-8",
+            )
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"automation_mode": "normal", "current_workflow": "feature-delivery", "current_status": "executing", "active_tasks": []}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"libu2": {"agent_id": "libu2", "session_key": "sess-close", "status": "active"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (runtime_dir / "runtime-config.json").write_text(
+                json.dumps(
+                    {
+                        "close_session_command": f'"{sys.executable}" "{helper}" "{{payload_file}}"',
+                        "host_interface_sources": {"close_session_command": "project-config"},
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = natural_language_control.execute_request(project_root, "司礼监：关闭 libu2 当前会话")
+
+            self.assertEqual(payload["intent"], "close_session")
+            self.assertEqual(payload["session_close"]["native_close_status"], "closed")
+            self.assertEqual(payload["control"]["automation_mode"], "normal")
+
+    def test_project_intake_records_requirement_and_creates_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace_root = Path(tmp) / "workspace"
+            workspace_root.mkdir(parents=True)
+            (workspace_root / "OpenClaw" / "skills").mkdir(parents=True)
+
+            intake = project_intake.record_requirement(
+                workspace_root,
+                "\u505a\u4e00\u4e2a\u5185\u90e8\u5ba1\u6279\u7cfb\u7edf\uff0c\u652f\u6301\u591a\u7ea7\u5ba1\u6279\u548c\u901a\u77e5\uff0c\u9879\u76ee\u540d\u4e3a approval-center\u3002",
+                actor="user",
+            )
+            self.assertFalse(intake["needs_project_name"])
+            self.assertEqual(intake["project_name"], "approval-center")
+            self.assertTrue((workspace_root / ".sili-jian-intake.json").exists())
+
+            created = project_intake.create_project_from_intake(workspace_root, actor="user")
+
+            self.assertEqual(created["status"], "project-created")
+            project_root = Path(created["project_root"])
+            self.assertTrue((project_root / "ai" / "tools" / "project_intake.py").exists())
+            task_intake = (project_root / "ai" / "state" / "task-intake.md").read_text(encoding="utf-8")
+            self.assertIn("\u5185\u90e8\u5ba1\u6279\u7cfb\u7edf", task_intake)
+
+    def test_project_intake_extracts_real_chinese_project_name_patterns(self):
+        cases = [
+            ("\u505a\u4e00\u4e2a\u5185\u90e8\u5ba1\u6279\u7cfb\u7edf\uff0c\u652f\u6301\u591a\u7ea7\u5ba1\u6279\u548c\u901a\u77e5\uff0c\u9879\u76ee\u540d\u4e3a approval-center\u3002", "approval-center"),
+            ("\u9879\u76ee\u540d: \u5ba1\u6279\u4e2d\u5fc3", "\u5ba1\u6279\u4e2d\u5fc3"),
+            ("\u9879\u76ee\u540d\u79f0\u662f approval center", "approval center"),
+            ("\u547d\u540d\u4e3a \u5ba1\u6279\u4e2d\u5fc3\u4e8c\u671f", "\u5ba1\u6279\u4e2d\u5fc3\u4e8c\u671f"),
+            ("project name: demo-app", "demo-app"),
+        ]
+
+        for request, expected in cases:
+            with self.subTest(request=request):
+                self.assertEqual(project_intake.parse_project_name(request), expected)
+
+    def test_project_intake_rejects_existing_non_empty_project_slug_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace_root = Path(tmp) / "workspace"
+            existing_root = workspace_root / "approval-center"
+            workspace_root.mkdir(parents=True)
+            (workspace_root / "OpenClaw" / "skills").mkdir(parents=True)
+            existing_root.mkdir(parents=True)
+            (existing_root / ".git").mkdir()
+            (existing_root / "package.json").write_text("{}\n", encoding="utf-8")
+
+            project_intake.record_requirement(
+                workspace_root,
+                "\u505a\u4e00\u4e2a\u5185\u90e8\u5ba1\u6279\u7cfb\u7edf\uff0c\u652f\u6301\u591a\u7ea7\u5ba1\u6279\u548c\u901a\u77e5\uff0c\u9879\u76ee\u540d\u4e3a approval-center\u3002",
+                actor="user",
+            )
+
+            with self.assertRaisesRegex(ValueError, "already exists"):
+                project_intake.create_project_from_intake(workspace_root, actor="user")
+
+    def test_project_intake_rejects_non_workspace_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            project_root.mkdir(parents=True)
+            (project_root / ".git").mkdir()
+
+            with self.assertRaises(ValueError):
+                project_intake.record_requirement(project_root, "\u505a\u4e00\u4e2a\u65b0\u9879\u76ee")
+
+    def test_first_run_check_workspace_root_mentions_project_intake(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace_root = Path(tmp) / "workspace"
+            (workspace_root / "OpenClaw" / "skills").mkdir(parents=True)
+
+            with mock.patch.object(
+                first_run_check,
+                "ensure_agents",
+                return_value={
+                    "missing_peer_agents": [],
+                    "detection_source": "test",
+                    "dispatch_ready": False,
+                    "workspace_root": str(workspace_root),
+                    "workspace_root_source": "test",
+                },
+            ):
+                report = first_run_check.build_report(workspace_root, workspace_root, create_missing=False, lang="en")
+
+            self.assertIn("scripts/project_intake.py", report)
+
+    def test_bootstrap_auto_scenario_treats_empty_git_repo_as_new_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            project_root.mkdir(parents=True)
+            (project_root / ".git").mkdir()
+
+            self.assertEqual(bootstrap_governance.detect_bootstrap_scenario(project_root, "auto"), "new-project")
+
+            (project_root / "src").mkdir()
+            self.assertEqual(bootstrap_governance.detect_bootstrap_scenario(project_root, "auto"), "mid-stream-takeover")
+
+    def test_takeover_inspection_generates_current_implementation_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            (project_root / ".git").mkdir(parents=True)
+            (project_root / "src").mkdir()
+            (project_root / "src" / "main.py").write_text("print('demo')\n", encoding="utf-8")
+
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--scenario",
+                    "mid-stream-takeover",
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            first_cycle = run_orchestrator.run(project_root, max_dispatch=1, transport="outbox")
+            second_cycle = run_orchestrator.run(project_root, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(first_cycle["status"], "local-progress")
+            self.assertEqual(second_cycle["status"], "local-progress")
+            summary_path = project_root / "ai" / "reports" / "current-implementation-summary.md"
+            self.assertTrue(summary_path.exists())
+            summary_text = summary_path.read_text(encoding="utf-8")
+            self.assertIn("Existing implementation detected", summary_text)
+            self.assertIn("src/main.py", summary_text)
+
+    def test_takeover_planning_requires_customer_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            (project_root / ".git").mkdir(parents=True)
+            (project_root / "src").mkdir()
+            (project_root / "src" / "main.py").write_text("print('demo')\n", encoding="utf-8")
+
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--scenario",
+                    "mid-stream-takeover",
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            (state_dir / "architecture.md").write_text("# Architecture\n\n- API and admin UI\n", encoding="utf-8")
+            (state_dir / "task-tree.json").write_text(
+                json.dumps({"mainline": ["baseline"], "tasks": [{"id": "doc-freeze"}]}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "architecture-review.md").write_text(
+                "# Architecture Review\n\n## Conclusion\n\n- PASS\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "current-implementation-summary.md").write_text(
+                "# Current Implementation Summary\n\n## Status\n\n- Existing implementation detected and summarized for customer confirmation.\n",
+                encoding="utf-8",
+            )
+            (state_dir / "task-intake.md").write_text(
+                """# Task Intake
+
+## Raw Requirement
+
+- stabilize the existing approval flow
+
+## Current Implemented Scope
+
+- legacy approval APIs and one admin entry page
+
+## Confirmed Requirement
+
+- customer wants to keep current approval flow and add audit trail
+
+## Frozen Requirement
+
+- freeze current approval flow and add audit trail in phase one
+
+## Review Gates
+
+- Internal document review status: PASS
+- Customer acknowledged current implementation baseline: pending
+- Customer confirmed requirement and scope: yes
+- Approved to start development: pending
+""",
+                encoding="utf-8",
+            )
+
+            pending_report = inspect_project(project_root, intent="mid-stream-takeover")
+            self.assertFalse(pending_report["planning_ready"])
+            self.assertFalse(pending_report["customer_acknowledged_implementation"])
+            self.assertFalse(pending_report["development_approved"])
+
+            (state_dir / "task-intake.md").write_text(
+                """# Task Intake
+
+## Raw Requirement
+
+- stabilize the existing approval flow
+
+## Current Implemented Scope
+
+- legacy approval APIs and one admin entry page
+
+## Confirmed Requirement
+
+- customer wants to keep current approval flow and add audit trail
+
+## Frozen Requirement
+
+- freeze current approval flow and add audit trail in phase one
+
+## Review Gates
+
+- Internal document review status: PASS
+- Customer acknowledged current implementation baseline: yes
+- Customer confirmed requirement and scope: yes
+- Approved to start development: yes
+""",
+                encoding="utf-8",
+            )
+
+            approved_report = inspect_project(project_root, intent="mid-stream-takeover")
+            self.assertTrue(approved_report["planning_ready"])
+            self.assertTrue(approved_report["customer_acknowledged_implementation"])
+            self.assertTrue(approved_report["customer_confirmed_requirement"])
+            self.assertTrue(approved_report["development_approved"])
+
+    def test_update_state_and_handoff_waits_for_customer_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            (state_dir / "architecture.md").write_text("# Architecture\n\n- brand new service\n", encoding="utf-8")
+            (state_dir / "task-tree.json").write_text(
+                json.dumps({"mainline": ["mvp"], "tasks": [{"id": "scope-freeze"}]}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "architecture-review.md").write_text(
+                "# Architecture Review\n\n## Conclusion\n\n- PASS\n",
+                encoding="utf-8",
+            )
+            (state_dir / "task-intake.md").write_text(
+                """# Task Intake
+
+## Raw Requirement
+
+- build a lightweight approval center
+
+## Current Implemented Scope
+
+- No existing implementation yet; this is a brand new project baseline.
+
+## Confirmed Requirement
+
+- customer wants approval submit, review, and notification in MVP
+
+## Frozen Requirement
+
+- MVP includes submit, review, and notification
+
+## Review Gates
+
+- Internal document review status: PASS
+- Customer acknowledged current implementation baseline: not-applicable
+- Customer confirmed requirement and scope: pending
+- Approved to start development: pending
+""",
+                encoding="utf-8",
+            )
+
+            step = workflow_engine.WorkflowStep(id="update-state-and-handoff", role="orchestrator", agent_id="orchestrator")
+            orchestrator_local_steps.apply_post_completion_state(project_root, step)
+            blocked_state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(blocked_state["current_workflow"], "new-project")
+            self.assertEqual(blocked_state["current_status"], "draft")
+            self.assertFalse(blocked_state["execution_allowed"])
+            self.assertIn("customer", blocked_state["next_action"].lower())
+
+            (state_dir / "task-intake.md").write_text(
+                """# Task Intake
+
+## Raw Requirement
+
+- build a lightweight approval center
+
+## Current Implemented Scope
+
+- No existing implementation yet; this is a brand new project baseline.
+
+## Confirmed Requirement
+
+- customer wants approval submit, review, and notification in MVP
+
+## Frozen Requirement
+
+- MVP includes submit, review, and notification
+
+## Review Gates
+
+- Internal document review status: PASS
+- Customer acknowledged current implementation baseline: not-applicable
+- Customer confirmed requirement and scope: yes
+- Approved to start development: yes
+""",
+                encoding="utf-8",
+            )
+
+            orchestrator_local_steps.apply_post_completion_state(project_root, step)
+            approved_state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(approved_state["current_workflow"], "feature-delivery")
+            self.assertEqual(approved_state["current_status"], "plan-approved")
+            self.assertTrue(approved_state["execution_allowed"])
+
+    def test_update_state_and_handoff_calls_out_missing_architecture_before_generic_continue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            (state_dir / "task-tree.json").write_text(
+                json.dumps({"mainline": ["mvp"], "tasks": [{"id": "scope-freeze"}]}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "architecture-review.md").write_text(
+                "# Architecture Review\n\n## Conclusion\n\n- PASS\n",
+                encoding="utf-8",
+            )
+            (state_dir / "task-intake.md").write_text(
+                """# Task Intake
+
+## Raw Requirement
+
+- build a lightweight approval center
+
+## Current Implemented Scope
+
+- No existing implementation yet; this is a brand new project baseline.
+
+## Confirmed Requirement
+
+- customer wants approval submit, review, and notification in MVP
+
+## Frozen Requirement
+
+- MVP includes submit, review, and notification
+
+## Review Gates
+
+- Internal document review status: PASS
+- Customer acknowledged current implementation baseline: not-applicable
+- Customer confirmed requirement and scope: yes
+- Approved to start development: yes
+""",
+                encoding="utf-8",
+            )
+
+            step = workflow_engine.WorkflowStep(id="update-state-and-handoff", role="orchestrator", agent_id="orchestrator")
+            orchestrator_local_steps.apply_post_completion_state(project_root, step)
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["current_status"], "draft")
+            self.assertFalse(state["execution_allowed"])
+            self.assertEqual(state["next_action"], "write architecture.md with the approved system design")
+
+    def test_runtime_loop_dispatches_delivers_and_consumes_in_one_cycle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            helper = Path(tmp) / "transport_helper.py"
+            write_transport_helper(helper)
+
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            with mock.patch.dict(os.environ, {"OPENCLAW_SPAWN_COMMAND": f'"{sys.executable}" "{helper}" "{{dispatch_file}}"'}):
+                summary = runtime_loop.run_loop(project_root, max_cycles=4, max_dispatch=1, transport="outbox", activate=True)
+
+            self.assertGreaterEqual(summary["total_dispatch_count"], 1)
+            self.assertEqual(summary["total_sent_count"], 1)
+            self.assertEqual(summary["total_processed_count"], 1)
+            state = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertIn("identify-project", state["workflow_progress"]["completed_steps"])
+            self.assertIn("bootstrap-governance", state["workflow_progress"]["completed_steps"])
+            self.assertIn("create-run-snapshot", state["workflow_progress"]["completed_steps"])
+            self.assertIn("freeze-initial-plan", state["workflow_progress"]["completed_steps"])
+            self.assertTrue((project_root / "ai" / "reports" / "runtime-loop-summary.json").exists())
+            self.assertTrue((project_root / "ai" / "reports" / "parent-session-recovery.json").exists())
+
+    def test_context_rollover_writes_resume_prompt_and_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "testing",
+                        "current_status": "testing",
+                        "next_action": "Collect test evidence.",
+                        "next_owner": "bingbu",
+                        "active_tasks": [{"task_id": "BINGBU-1", "role": "bingbu", "status": "in-progress", "workflow_step_id": "bingbu-testing"}],
+                        "blockers": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            (state_dir / "project-meta.json").write_text(json.dumps({"project_name": "demo", "project_id": "demo"}) + "\n", encoding="utf-8")
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (state_dir / "START_HERE.md").write_text("# Start Here\n", encoding="utf-8")
+
+            payload = context_rollover.create_rollover(project_root)
+            self.assertIn("Collect test evidence.", payload["resume_prompt"])
+            self.assertTrue((reports_dir / "orchestrator-rollover.md").exists())
+            registry = json.loads((state_dir / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["orchestrator"]["status"], "waiting")
 
     def test_validate_state_accepts_libu_documentation_step(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -186,6 +2734,705 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             report = validate_state.validate(project_root)
             codes = {item["code"] for item in report["findings"]}
             self.assertNotIn("workflow_step_not_in_current_workflow", codes)
+
+    def test_build_department_matrix_ignores_stale_handoff_files_outside_registry_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir = project_root / "ai" / "state"
+            reports_dir.mkdir(parents=True)
+            state_dir.mkdir(parents=True)
+
+            registry: dict[str, dict[str, str]] = {}
+            for role in orchestrator_local_steps.DEPARTMENT_ROLES:
+                active_dir = project_root / "ai" / "handoff" / role / "active"
+                active_dir.mkdir(parents=True, exist_ok=True)
+                current_path = active_dir / f"{role.upper()}-CURRENT.md"
+                stale_path = active_dir / f"{role.upper()}-OLD.md"
+                current_path.write_text(
+                    f"# Role Handoff\n\n- task_id: {role.upper()}-CURRENT\n- role: {role}\n- status: completed\n- blockers: none\n",
+                    encoding="utf-8",
+                )
+                stale_path.write_text(
+                    f"# Role Handoff\n\n- task_id: {role.upper()}-OLD\n- role: {role}\n- status: blocked\n- blockers: schema drift\n",
+                    encoding="utf-8",
+                )
+                registry[role] = {
+                    "agent_id": role,
+                    "handoff_path": str(current_path.relative_to(project_root)).replace("\\", "/"),
+                    "status": "idle",
+                }
+
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps(registry, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            orchestrator_local_steps.build_department_matrix(
+                project_root,
+                {"current_workflow": "review-and-release"},
+                "collect-department-approvals",
+            )
+
+            matrix = (reports_dir / "department-approval-matrix.md").read_text(encoding="utf-8")
+            self.assertIn("- blockers: none", matrix)
+            self.assertIn("\n- PASS\n", matrix)
+
+    def test_build_department_matrix_includes_duchayuan_cross_review_when_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir = project_root / "ai" / "state"
+            reports_dir.mkdir(parents=True)
+            state_dir.mkdir(parents=True)
+
+            registry: dict[str, dict[str, str]] = {}
+            for role in [*orchestrator_local_steps.DEPARTMENT_ROLES, "duchayuan"]:
+                active_dir = project_root / "ai" / "handoff" / role / "active"
+                active_dir.mkdir(parents=True, exist_ok=True)
+                current_path = active_dir / f"{role.upper()}-CURRENT.md"
+                current_path.write_text(
+                    f"# Role Handoff\n\n- task_id: {role.upper()}-CURRENT\n- role: {role}\n- status: completed\n- blockers: none\n",
+                    encoding="utf-8",
+                )
+                registry[role] = {
+                    "agent_id": role,
+                    "handoff_path": str(current_path.relative_to(project_root)).replace("\\", "/"),
+                    "status": "idle",
+                }
+
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps(registry, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            orchestrator_local_steps.build_department_matrix(
+                project_root,
+                {"current_workflow": "feature-delivery"},
+                "department-review",
+            )
+
+            matrix = (reports_dir / "department-approval-matrix.md").read_text(encoding="utf-8")
+            self.assertIn("## Reviewer duchayuan", matrix)
+            self.assertIn("- libu2: PASS", matrix)
+
+    def test_feature_delivery_review_limits_default_to_four_before_cabinet(self):
+        state = json.loads(
+            (REPO_ROOT / "assets" / "project-skeleton" / "ai" / "state" / "orchestrator-state.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(state["review_cycle_limit_before_cabinet"], 4)
+        self.assertEqual(state["review_cycle_count_before_cabinet"], 0)
+        self.assertEqual(state["review_cycle_limit_after_cabinet"], 2)
+        self.assertEqual(state["review_cycle_count_after_cabinet"], 0)
+
+    def test_department_review_failure_requeues_implementation_batch_within_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            reports_dir.mkdir(parents=True)
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "execution_allowed": True,
+                        "testing_allowed": False,
+                        "release_allowed": False,
+                        "review_cycle_limit_before_cabinet": 4,
+                        "review_cycle_count_before_cabinet": 0,
+                        "review_cycle_limit_after_cabinet": 2,
+                        "review_cycle_count_after_cabinet": 0,
+                        "review_phase": "normal-review",
+                        "cabinet_replan_triggered": False,
+                        "active_tasks": [],
+                        "workflow_progress": {
+                            "completed_steps": [
+                                "intake-feature",
+                                "confirm-or-replan",
+                                "plan-approval",
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                                "libu2-cross-review",
+                                "hubu-cross-review",
+                                "gongbu-cross-review",
+                                "bingbu-cross-review",
+                                "libu-cross-review",
+                                "xingbu-cross-review",
+                                "duchayuan-cross-review",
+                            ],
+                            "blocked_steps": [],
+                            "dispatched_steps": [],
+                        },
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry: dict[str, dict[str, str]] = {}
+            for role in [*orchestrator_local_steps.DEPARTMENT_ROLES, "duchayuan"]:
+                active_dir = project_root / "ai" / "handoff" / role / "active"
+                active_dir.mkdir(parents=True, exist_ok=True)
+                current_path = active_dir / f"{role.upper()}-CURRENT.md"
+                status = "blocked" if role == "hubu" else "completed"
+                blockers = "schema drift" if role == "hubu" else "none"
+                current_path.write_text(
+                    f"# Role Handoff\n\n- task_id: {role.upper()}-CURRENT\n- role: {role}\n- status: {status}\n- blockers: {blockers}\n",
+                    encoding="utf-8",
+                )
+                registry[role] = {
+                    "agent_id": role,
+                    "handoff_path": str(current_path.relative_to(project_root)).replace("\\", "/"),
+                    "status": "idle",
+                }
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps(registry, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            orchestrator_local_steps.execute_local_step(
+                project_root,
+                workflow_engine.WorkflowStep(id="department-review", role="orchestrator", agent_id="orchestrator"),
+                "DEPT-REVIEW-001",
+            )
+
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["current_status"], "review-rework")
+            self.assertEqual(state["review_cycle_count_before_cabinet"], 1)
+            self.assertEqual(state["next_owner"], "orchestrator")
+            self.assertNotIn("libu2-implementation", state["workflow_progress"]["completed_steps"])
+            self.assertNotIn("department-review", state["workflow_progress"]["completed_steps"])
+
+            workflow = workflow_engine.load_workflow(project_root)
+            ready = [step.id for step in workflow_engine.ready_steps(workflow, state)]
+            self.assertEqual(ready[:3], ["libu2-implementation", "hubu-implementation", "gongbu-implementation"])
+
+    def test_department_review_failure_exceeding_first_limit_escalates_to_cabinet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            reports_dir.mkdir(parents=True)
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "execution_allowed": True,
+                        "testing_allowed": False,
+                        "release_allowed": False,
+                        "review_cycle_limit_before_cabinet": 1,
+                        "review_cycle_count_before_cabinet": 1,
+                        "review_cycle_limit_after_cabinet": 2,
+                        "review_cycle_count_after_cabinet": 0,
+                        "review_phase": "normal-review",
+                        "cabinet_replan_triggered": False,
+                        "active_tasks": [],
+                        "workflow_progress": {
+                            "completed_steps": [
+                                "intake-feature",
+                                "confirm-or-replan",
+                                "plan-approval",
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                                "libu2-cross-review",
+                                "hubu-cross-review",
+                                "gongbu-cross-review",
+                                "bingbu-cross-review",
+                                "libu-cross-review",
+                                "xingbu-cross-review",
+                                "duchayuan-cross-review",
+                            ],
+                            "blocked_steps": [],
+                            "dispatched_steps": [],
+                        },
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry: dict[str, dict[str, str]] = {}
+            for role in [*orchestrator_local_steps.DEPARTMENT_ROLES, "duchayuan"]:
+                active_dir = project_root / "ai" / "handoff" / role / "active"
+                active_dir.mkdir(parents=True, exist_ok=True)
+                current_path = active_dir / f"{role.upper()}-CURRENT.md"
+                status = "blocked" if role == "gongbu" else "completed"
+                blockers = "flow mismatch" if role == "gongbu" else "none"
+                current_path.write_text(
+                    f"# Role Handoff\n\n- task_id: {role.upper()}-CURRENT\n- role: {role}\n- status: {status}\n- blockers: {blockers}\n",
+                    encoding="utf-8",
+                )
+                registry[role] = {
+                    "agent_id": role,
+                    "handoff_path": str(current_path.relative_to(project_root)).replace("\\", "/"),
+                    "status": "idle",
+                }
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps(registry, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            orchestrator_local_steps.execute_local_step(
+                project_root,
+                workflow_engine.WorkflowStep(id="department-review", role="orchestrator", agent_id="orchestrator"),
+                "DEPT-REVIEW-002",
+            )
+
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["current_status"], "cabinet-review")
+            self.assertTrue(state["cabinet_replan_triggered"])
+            self.assertEqual(state["review_phase"], "cabinet-replan-review")
+            self.assertEqual(state["next_owner"], "neige")
+            cabinet_report = (reports_dir / "cabinet-replan-report.md").read_text(encoding="utf-8")
+            self.assertIn("flow mismatch", cabinet_report)
+            review_history = json.loads((reports_dir / "review-history.json").read_text(encoding="utf-8"))
+            self.assertEqual(review_history["entries"][-1]["outcome"], "escalated-to-cabinet")
+
+            workflow = workflow_engine.load_workflow(project_root)
+            ready = [step.id for step in workflow_engine.ready_steps(workflow, state)]
+            self.assertEqual(ready[0], "confirm-or-replan")
+
+    def test_department_review_failure_after_cabinet_limit_generates_customer_decision_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            reports_dir.mkdir(parents=True)
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "execution_allowed": True,
+                        "testing_allowed": False,
+                        "release_allowed": False,
+                        "review_cycle_limit_before_cabinet": 4,
+                        "review_cycle_count_before_cabinet": 4,
+                        "review_cycle_limit_after_cabinet": 1,
+                        "review_cycle_count_after_cabinet": 1,
+                        "review_phase": "cabinet-replan-review",
+                        "cabinet_replan_triggered": True,
+                        "primary_goal": "Ship the current governed batch safely.",
+                        "active_tasks": [],
+                        "workflow_progress": {
+                            "completed_steps": [
+                                "intake-feature",
+                                "confirm-or-replan",
+                                "plan-approval",
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                                "libu2-cross-review",
+                                "hubu-cross-review",
+                                "gongbu-cross-review",
+                                "bingbu-cross-review",
+                                "libu-cross-review",
+                                "xingbu-cross-review",
+                                "duchayuan-cross-review",
+                            ],
+                            "blocked_steps": [],
+                            "dispatched_steps": [],
+                        },
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            registry: dict[str, dict[str, str]] = {}
+            for role in [*orchestrator_local_steps.DEPARTMENT_ROLES, "duchayuan"]:
+                active_dir = project_root / "ai" / "handoff" / role / "active"
+                active_dir.mkdir(parents=True, exist_ok=True)
+                current_path = active_dir / f"{role.upper()}-CURRENT.md"
+                status = "blocked" if role == "libu2" else "completed"
+                blockers = "api contract still unstable" if role == "libu2" else "none"
+                current_path.write_text(
+                    f"# Role Handoff\n\n- task_id: {role.upper()}-CURRENT\n- role: {role}\n- status: {status}\n- blockers: {blockers}\n",
+                    encoding="utf-8",
+                )
+                registry[role] = {
+                    "agent_id": role,
+                    "handoff_path": str(current_path.relative_to(project_root)).replace("\\", "/"),
+                    "status": "idle",
+                }
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps(registry, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            orchestrator_local_steps.execute_local_step(
+                project_root,
+                workflow_engine.WorkflowStep(id="department-review", role="orchestrator", agent_id="orchestrator"),
+                "DEPT-REVIEW-003",
+            )
+
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["current_status"], "await-customer-decision")
+            self.assertEqual(state["review_escalation_level"], "customer")
+            report_text = (reports_dir / "customer-decision-required.md").read_text(encoding="utf-8")
+            self.assertIn("当前批次", report_text)
+            self.assertIn("api contract still unstable", report_text)
+            self.assertIn("interface-contract", report_text)
+            review_history = json.loads((reports_dir / "review-history.json").read_text(encoding="utf-8"))
+            self.assertEqual(review_history["entries"][-1]["outcome"], "customer-decision-required")
+
+            result = run_orchestrator.run(project_root, max_dispatch=1, transport="outbox")
+            self.assertEqual(result["status"], "customer-decision-required")
+
+    def test_configure_review_controls_updates_state_and_config_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"current_workflow": "feature-delivery"}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            payload = configure_review_controls.configure(project_root, before_cabinet=6, after_cabinet=3)
+            self.assertEqual(payload["review_cycle_limit_before_cabinet"], 6)
+            self.assertEqual(payload["review_cycle_limit_after_cabinet"], 3)
+
+            controls = json.loads((state_dir / "review-controls.json").read_text(encoding="utf-8"))
+            self.assertEqual(controls["review_cycle_limit_before_cabinet"], 6)
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["review_cycle_limit_before_cabinet"], 6)
+            self.assertEqual(state["review_cycle_limit_after_cabinet"], 3)
+
+    def test_resume_customer_decision_restarts_planning_for_scope_reduction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            workflows_dir = project_root / "workflows"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "customer-decision",
+                        "current_status": "await-customer-decision",
+                        "review_phase": "await-customer-decision",
+                        "review_cycle_limit_before_cabinet": 4,
+                        "review_cycle_count_before_cabinet": 4,
+                        "review_cycle_limit_after_cabinet": 2,
+                        "review_cycle_count_after_cabinet": 2,
+                        "cabinet_replan_triggered": True,
+                        "workflow_progress": {
+                            "completed_steps": [
+                                "intake-feature",
+                                "confirm-or-replan",
+                                "plan-approval",
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                                "libu2-cross-review",
+                                "hubu-cross-review",
+                                "gongbu-cross-review",
+                                "bingbu-cross-review",
+                                "libu-cross-review",
+                                "xingbu-cross-review",
+                                "duchayuan-cross-review",
+                                "department-review",
+                            ],
+                            "blocked_steps": [],
+                            "dispatched_steps": [],
+                        },
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (state_dir / "START_HERE.md").write_text("# Start Here\n", encoding="utf-8")
+
+            payload = resume_customer_decision.apply_customer_decision(
+                project_root,
+                "scope-reduction",
+                "Customer chose a smaller first batch.",
+            )
+            self.assertEqual(payload["current_status"], "rework")
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["next_owner"], "neige")
+            self.assertEqual(state["review_cycle_count_before_cabinet"], 0)
+            self.assertFalse(state["cabinet_replan_triggered"])
+            workflow = workflow_engine.load_workflow(project_root)
+            ready = [step.id for step in workflow_engine.ready_steps(workflow, state)]
+            self.assertEqual(ready[0], "confirm-or-replan")
+            resolution = (reports_dir / "customer-decision-resolution.md").read_text(encoding="utf-8")
+            self.assertIn("scope-reduction", resolution)
+
+    def test_validate_state_accepts_review_and_release_workflow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "final-audit",
+                        "current_status": "final-audit",
+                        "current_workflow": "review-and-release",
+                        "next_owner": "duchayuan",
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: final-audit\n- Workflow: review-and-release\n- Next owner: duchayuan\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: final-audit\n- Current phase: final-audit\n- Current workflow: review-and-release\n- Next owner: duchayuan\n",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertNotIn("unknown_current_workflow", codes)
+            self.assertTrue(report["state_consistent"])
+
+    def test_validate_state_accepts_resume_orchestrator_step_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            handoff_dir = project_root / "ai" / "handoff" / "orchestrator" / "active"
+            state_dir.mkdir(parents=True)
+            handoff_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "recovery",
+                        "current_status": "paused",
+                        "current_workflow": "resume-orchestrator",
+                        "next_owner": "orchestrator",
+                        "execution_allowed": True,
+                        "testing_allowed": False,
+                        "release_allowed": False,
+                        "active_tasks": [
+                            {
+                                "task_id": "RECOVERY-1",
+                                "role": "orchestrator",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/orchestrator/active/RECOVERY-1.md",
+                                "workflow_step_id": "read-active-handoffs",
+                            }
+                        ],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: paused\n- Workflow: resume-orchestrator\n- Next owner: orchestrator\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: paused\n- Current phase: recovery\n- Current workflow: resume-orchestrator\n- Next owner: orchestrator\n",
+                encoding="utf-8",
+            )
+            (handoff_dir / "RECOVERY-1.md").write_text(
+                "# Role Handoff\n\n- task_id: RECOVERY-1\n- role: orchestrator\n- status: in-progress\n- workflow_step_id: read-active-handoffs\n",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertNotIn("workflow_step_not_in_current_workflow", codes)
+
+    def test_validate_state_accepts_current_feature_delivery_step_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            handoff_dir = project_root / "ai" / "handoff" / "hubu" / "active"
+            state_dir.mkdir(parents=True)
+            handoff_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "hubu",
+                        "execution_allowed": True,
+                        "testing_allowed": False,
+                        "release_allowed": False,
+                        "active_tasks": [
+                            {
+                                "task_id": "DATA-001",
+                                "role": "hubu",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/hubu/active/DATA-001.md",
+                                "workflow_step_id": "hubu-implementation",
+                            }
+                        ],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: executing\n- Workflow: feature-delivery\n- Next owner: hubu\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: executing\n- Current phase: executing\n- Current workflow: feature-delivery\n- Next owner: hubu\n",
+                encoding="utf-8",
+            )
+            (handoff_dir / "DATA-001.md").write_text(
+                "# Role Handoff\n\n- task_id: DATA-001\n- role: hubu\n- status: in-progress\n- workflow_step_id: hubu-implementation\n",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertNotIn("workflow_step_not_in_current_workflow", codes)
+
+    def test_validate_state_accepts_feature_delivery_cross_review_step_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            handoff_dir = project_root / "ai" / "handoff" / "duchayuan" / "active"
+            state_dir.mkdir(parents=True)
+            handoff_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "duchayuan",
+                        "execution_allowed": True,
+                        "testing_allowed": False,
+                        "release_allowed": False,
+                        "active_tasks": [
+                            {
+                                "task_id": "REVIEW-001",
+                                "role": "duchayuan",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/duchayuan/active/REVIEW-001.md",
+                                "workflow_step_id": "duchayuan-cross-review",
+                            }
+                        ],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: department-review\n- Workflow: feature-delivery\n- Next owner: duchayuan\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: department-review\n- Current phase: department-review\n- Current workflow: feature-delivery\n- Next owner: duchayuan\n",
+                encoding="utf-8",
+            )
+            (handoff_dir / "REVIEW-001.md").write_text(
+                "# Role Handoff\n\n- task_id: REVIEW-001\n- role: duchayuan\n- status: in-progress\n- workflow_step_id: duchayuan-cross-review\n",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertNotIn("workflow_step_not_in_current_workflow", codes)
+
+    def test_validate_state_detects_mismatch_with_lowercase_markdown_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "planning",
+                        "current_status": "draft",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "libu",
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- stage: draft\n- workflow: takeover-project\n- next owner: neige\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- status: draft\n- current phase: planning\n- current workflow: takeover-project\n- next owner: neige\n",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertIn("workflow_mismatch_start_here", codes)
+            self.assertIn("workflow_mismatch_handoff", codes)
+            self.assertFalse(report["state_consistent"])
 
     def test_repair_state_fixes_common_drift(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -441,6 +3688,64 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             codes = {item["code"] for item in report["findings"]}
             self.assertIn("unknown_current_workflow", codes)
 
+    def test_validate_state_rejects_handoff_outside_project_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            outside_handoff = Path(tmp) / "outside.md"
+            outside_handoff.write_text(
+                """# Role Handoff
+
+- task_id: TASK-001
+- role: libu2
+- status: in-progress
+- workflow_step_id: libu2-implementation
+""",
+                encoding="utf-8",
+            )
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "execution",
+                        "current_status": "executing",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "libu2",
+                        "execution_allowed": True,
+                        "testing_allowed": False,
+                        "release_allowed": False,
+                        "active_tasks": [
+                            {
+                                "task_id": "TASK-001",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "handoff_path": str(outside_handoff),
+                                "workflow_step_id": "libu2-implementation",
+                            }
+                        ],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: executing\n- Workflow: feature-delivery\n- Next owner: libu2\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: executing\n- Current phase: execution\n- Current workflow: feature-delivery\n- Next owner: libu2\n",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertIn("active_task_handoff_outside_project_root", codes)
+            self.assertFalse(report["state_consistent"])
+
     def test_scenario_from_intent_prefers_session_recovery_over_new_feature(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -523,6 +3828,109 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertIn("test-report.md", report["blocker_sources"])
             self.assertFalse(report["phase_gate_passed"])
 
+    def test_validate_gates_blocks_indented_aggregated_matrix_blockers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "current_workflow": "feature-delivery",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (reports_dir / "test-report.md").write_text("# Test Report\n\n## Recommendation\n\n- PASS\n", encoding="utf-8")
+            (reports_dir / "department-approval-matrix.md").write_text(
+                """# Department Approval Matrix
+
+## Reviewer libu2
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer hubu
+- libu2: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer gongbu
+- libu2: PASS
+- hubu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer bingbu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer libu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer xingbu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Aggregated Issues
+- blockers:
+  schema mismatch unresolved
+- warnings: none
+- suggestions: none
+- conflicts needing arbitration: none
+
+## Recommendation
+- PASS
+""",
+                encoding="utf-8",
+            )
+
+            report = validate_gates.validate(project_root)
+            self.assertIn("department-approval-matrix.md", report["blocker_sources"])
+            self.assertFalse(report["phase_gate_passed"])
+
     def test_validate_gates_accepts_filled_count_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -568,6 +3976,139 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             report = validate_gates.validate(project_root)
             self.assertNotIn("test-report.md", report["placeholder_sources"])
             self.assertTrue(report["phase_gate_passed"])
+
+    def test_validate_gates_blocks_review_stage_without_required_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "duchayuan",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: department-review\n- Current phase: department-review\n- Current workflow: feature-delivery\n- Next owner: duchayuan\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "test-report.md").write_text(
+                "# Test Report\n\n## Recommendation\n\n- PASS\n",
+                encoding="utf-8",
+            )
+
+            report = validate_gates.validate(project_root)
+            self.assertFalse(report["approval_matrix_present"])
+            self.assertFalse(report["phase_gate_passed"])
+
+    def test_validate_gates_allows_final_audit_before_release_artifacts_exist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "final-audit",
+                        "current_status": "final-audit",
+                        "current_workflow": "feature-delivery",
+                        "release_allowed": False,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (reports_dir / "test-report.md").write_text("# Test Report\n\n## Recommendation\n\n- PASS\n", encoding="utf-8")
+            (reports_dir / "department-approval-matrix.md").write_text(
+                """# Department Approval Matrix
+
+## Reviewer libu2
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer hubu
+- libu2: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer gongbu
+- libu2: PASS
+- hubu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer bingbu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer libu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer xingbu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Recommendation
+- PASS
+""",
+                encoding="utf-8",
+            )
+
+            report = validate_gates.validate(project_root)
+            self.assertTrue(report["phase_gate_passed"])
+            self.assertFalse(report["release_stage"])
+            self.assertFalse(report["final_gate_passed"])
 
     def test_validate_gates_blocks_aggregated_matrix_blockers(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -792,7 +4333,7 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             f"sys.path.insert(0, r'{str(SCRIPTS_DIR)}'); "
             "import run_repo_ci; "
             "targets={p.name for p in run_repo_ci.collect_py_targets()}; "
-            "required={'common.py','validate_gates.py','ensure_openclaw_agents.py','first_run_check.py','inspect_project.py','generate_takeover_report.py','recovery_summary.py'}; "
+            "required={'common.py','validate_gates.py','ensure_openclaw_agents.py','first_run_check.py','inspect_project.py','generate_takeover_report.py','recovery_summary.py','run_project_guard.py','render_agent_repair_brief.py','sync_project_tools.py','session_registry.py','workflow_engine.py','openclaw_adapter.py','openclaw_runtime_bridge.py','completion_consumer.py','context_rollover.py','run_orchestrator.py','inbox_watcher.py','runtime_loop.py','orchestrator_local_steps.py','repo_command_detector.py','provider_evidence.py','host_interface_probe.py','runtime_environment.py','environment_bootstrap.py','evidence_collector.py','escalation_manager.py','parent_session_recovery.py','automation_control.py','natural_language_control.py','change_request_control.py','replan_change_request.py','project_intake.py','configure_review_controls.py','resume_customer_decision.py'}; "
             "missing=sorted(required-targets); "
             "print('\\n'.join(missing)); "
             "raise SystemExit(1 if missing else 0)"
@@ -804,6 +4345,42 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_sync_project_tools_check_passes(self):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "sync_project_tools.py"), "--check"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("in sync", result.stdout)
+
+    def test_sync_project_tools_detects_and_repairs_drift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp) / "repo"
+            scripts_dir = repo_root / "scripts"
+            tools_dir = repo_root / "assets" / "project-skeleton" / "ai" / "tools"
+            scripts_dir.mkdir(parents=True)
+            tools_dir.mkdir(parents=True)
+
+            for name in sync_project_tools.PROJECT_TOOL_FILES:
+                (scripts_dir / name).write_text(f"# source {name}\n", encoding="utf-8")
+                (tools_dir / name).write_text(f"# old {name}\n", encoding="utf-8")
+
+            drift_file = sync_project_tools.PROJECT_TOOL_FILES[0]
+            (tools_dir / drift_file).write_text("# drifted scaffold\n", encoding="utf-8")
+
+            out_of_sync = sync_project_tools.find_out_of_sync_project_tools(repo_root)
+            self.assertIn(drift_file, out_of_sync)
+
+            updated = sync_project_tools.sync_project_tools(repo_root)
+            self.assertIn(drift_file, updated)
+            self.assertEqual(
+                (tools_dir / drift_file).read_text(encoding="utf-8"),
+                (scripts_dir / drift_file).read_text(encoding="utf-8"),
+            )
+            self.assertEqual(sync_project_tools.find_out_of_sync_project_tools(repo_root), [])
 
     def test_scaffolded_validate_state_catches_handoff_phase_and_step_drift(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1041,6 +4618,291 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             guard_summary = json.loads((reports_dir / "project-guard-summary.json").read_text(encoding="utf-8"))
             self.assertNotIn("test-report.md", guard_summary["gates"]["placeholder_sources"])
+
+    def test_scaffolded_project_guard_fails_when_final_gate_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            (project_root / ".git").mkdir(parents=True)
+
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--scenario",
+                    "mid-stream-takeover",
+                    "--project-name",
+                    "xianyu",
+                    "--project-id",
+                    "xianyu",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "final-audit",
+                        "current_status": "final-audit",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "duchayuan",
+                        "execution_allowed": True,
+                        "testing_allowed": True,
+                        "release_allowed": True,
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: final-audit\n- Workflow: feature-delivery\n- Next owner: duchayuan\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: final-audit\n- Current phase: final-audit\n- Current workflow: feature-delivery\n- Next owner: duchayuan\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "test-report.md").write_text(
+                "# Test Report\n\n## Recommendation\n\n- PASS\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "department-approval-matrix.md").write_text(
+                """# Department Approval Matrix
+
+## Reviewer libu2
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer hubu
+- libu2: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer gongbu
+- libu2: PASS
+- hubu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer bingbu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer libu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer xingbu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Recommendation
+- PASS
+""",
+                encoding="utf-8",
+            )
+            (reports_dir / "acceptance-report.md").write_text(
+                "# Acceptance Report\n\n## Final Conclusion\n\n- PASS\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "change-summary.md").write_text("# Change Summary\n\n- updated\n", encoding="utf-8")
+            (reports_dir / "gate-report.md").write_text(
+                "# Gate Report\n\n## Recommendation\n\n- PASS\n\n- mainline regression passed: NO\n- rollback point available: YES\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(project_root / "ai" / "tools" / "run_project_guard.py"), str(project_root)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            guard_summary = json.loads((reports_dir / "project-guard-summary.json").read_text(encoding="utf-8"))
+            self.assertTrue(guard_summary["gates"]["phase_gate_passed"])
+            self.assertFalse(guard_summary["gates"]["final_gate_passed"])
+
+    def test_render_agent_repair_brief_includes_final_gate_failure_reasons(self):
+        findings = render_agent_repair_brief.build_findings(
+            {"findings": [], "state_consistent": True},
+            {
+                "blocker_sources": [],
+                "placeholder_sources": [],
+                "phase_gate_passed": True,
+                "release_stage": True,
+                "final_gate_passed": False,
+                "handoff_present": True,
+                "test_report_present": True,
+                "approval_matrix_present": True,
+                "acceptance_report_present": True,
+                "change_summary_present": True,
+                "gate_report_present": True,
+                "matrix_complete": True,
+                "test_conclusion": "PASS",
+                "matrix_recommendation": "PASS",
+                "acceptance_conclusion": "PASS",
+                "gate_recommendation": "PASS",
+                "mainline_regression": "NO",
+                "rollback_point_available": "YES",
+                "release_allowed": True,
+            },
+        )
+
+        self.assertIn(
+            "[gates/error] final_gate_mainline_regression: mainline regression passed is `NO`.",
+            findings,
+        )
+
+    def test_validate_gates_does_not_require_rollback_point_without_release_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "accepted",
+                        "current_status": "accepted",
+                        "current_workflow": "feature-delivery",
+                        "release_allowed": False,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (reports_dir / "test-report.md").write_text("# Test Report\n\n## Recommendation\n\n- PASS\n", encoding="utf-8")
+            (reports_dir / "department-approval-matrix.md").write_text(
+                """# Department Approval Matrix
+
+## Reviewer libu2
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer hubu
+- libu2: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer gongbu
+- libu2: PASS
+- hubu: PASS
+- bingbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer bingbu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- libu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer libu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- xingbu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Reviewer xingbu
+- libu2: PASS
+- hubu: PASS
+- gongbu: PASS
+- bingbu: PASS
+- libu: PASS
+- findings: none
+- responses: none
+- closure: closed
+
+## Recommendation
+- PASS
+""",
+                encoding="utf-8",
+            )
+            (reports_dir / "acceptance-report.md").write_text(
+                "# Acceptance Report\n\n## Final Conclusion\n\n- PASS\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "change-summary.md").write_text("# Change Summary\n\n- updated\n", encoding="utf-8")
+            (reports_dir / "gate-report.md").write_text(
+                "# Gate Report\n\n## Recommendation\n\n- PASS\n\n- mainline regression passed: YES\n- rollback point available: NO\n",
+                encoding="utf-8",
+            )
+
+            report = validate_gates.validate(project_root)
+            self.assertTrue(report["release_stage"])
+            self.assertTrue(report["final_gate_passed"])
 
 
 if __name__ == "__main__":

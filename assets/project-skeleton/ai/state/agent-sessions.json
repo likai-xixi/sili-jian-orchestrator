@@ -1,50 +1,110 @@
 {
+  "orchestrator": {
+    "agent_id": "orchestrator",
+    "session_key": null,
+    "status": "idle",
+    "last_task_id": null,
+    "last_step_id": null,
+    "last_heartbeat_at": null,
+    "handoff_path": null,
+    "resume_prompt": null,
+    "active_workflow": null,
+    "blocked_reason": null
+  },
   "neige": {
     "agent_id": "neige",
     "session_key": null,
     "status": "idle",
-    "last_task_id": null
+    "last_task_id": null,
+    "last_step_id": null,
+    "last_heartbeat_at": null,
+    "handoff_path": null,
+    "resume_prompt": null,
+    "active_workflow": null,
+    "blocked_reason": null
   },
   "bingbu": {
     "agent_id": "bingbu",
     "session_key": null,
     "status": "idle",
-    "last_task_id": null
+    "last_task_id": null,
+    "last_step_id": null,
+    "last_heartbeat_at": null,
+    "handoff_path": null,
+    "resume_prompt": null,
+    "active_workflow": null,
+    "blocked_reason": null
   },
   "libu2": {
     "agent_id": "libu2",
     "session_key": null,
     "status": "idle",
-    "last_task_id": null
+    "last_task_id": null,
+    "last_step_id": null,
+    "last_heartbeat_at": null,
+    "handoff_path": null,
+    "resume_prompt": null,
+    "active_workflow": null,
+    "blocked_reason": null
   },
   "hubu": {
     "agent_id": "hubu",
     "session_key": null,
     "status": "idle",
-    "last_task_id": null
+    "last_task_id": null,
+    "last_step_id": null,
+    "last_heartbeat_at": null,
+    "handoff_path": null,
+    "resume_prompt": null,
+    "active_workflow": null,
+    "blocked_reason": null
   },
   "gongbu": {
     "agent_id": "gongbu",
     "session_key": null,
     "status": "idle",
-    "last_task_id": null
+    "last_task_id": null,
+    "last_step_id": null,
+    "last_heartbeat_at": null,
+    "handoff_path": null,
+    "resume_prompt": null,
+    "active_workflow": null,
+    "blocked_reason": null
   },
   "xingbu": {
     "agent_id": "xingbu",
     "session_key": null,
     "status": "idle",
-    "last_task_id": null
+    "last_task_id": null,
+    "last_step_id": null,
+    "last_heartbeat_at": null,
+    "handoff_path": null,
+    "resume_prompt": null,
+    "active_workflow": null,
+    "blocked_reason": null
   },
   "libu": {
     "agent_id": "libu",
     "session_key": null,
     "status": "idle",
-    "last_task_id": null
+    "last_task_id": null,
+    "last_step_id": null,
+    "last_heartbeat_at": null,
+    "handoff_path": null,
+    "resume_prompt": null,
+    "active_workflow": null,
+    "blocked_reason": null
   },
   "duchayuan": {
     "agent_id": "duchayuan",
     "session_key": null,
     "status": "idle",
-    "last_task_id": null
+    "last_task_id": null,
+    "last_step_id": null,
+    "last_heartbeat_at": null,
+    "handoff_path": null,
+    "resume_prompt": null,
+    "active_workflow": null,
+    "blocked_reason": null
   }
 }

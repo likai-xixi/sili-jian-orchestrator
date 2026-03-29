@@ -1,0 +1,22 @@
+{
+  "created_at": "",
+  "updated_at": "",
+  "openclaw_cli_path": "",
+  "openclaw_cli_available": false,
+  "bridge_path": "",
+  "bridge_available": false,
+  "parent_attach_command": "",
+  "spawn_command": "",
+  "send_command": "",
+  "close_session_command": "",
+  "parent_attach_command_auto_generated": false,
+  "host_interface_sources": {},
+  "tool_install_commands": {
+    "git": "",
+    "node": "",
+    "npm": "",
+    "pnpm": "",
+    "yarn": "",
+    "gh": ""
+  }
+}

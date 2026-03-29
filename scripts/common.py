@@ -11,6 +11,7 @@ STATE_FILES = [
     "task-intake.md",
     "project-handoff.md",
     "orchestrator-state.json",
+    "review-controls.json",
     "agent-sessions.json",
     "architecture.md",
     "task-tree.json",
@@ -35,6 +36,7 @@ REPORT_FILES = [
     "department-approval-matrix.md",
     "change-summary.md",
     "postmortem.md",
+    "current-implementation-summary.md",
 ]
 
 WORKFLOW_FILES = [
@@ -60,6 +62,8 @@ HANDOFF_DIRS = [
 ]
 
 PASS_CONCLUSIONS = {"PASS", "PASS_WITH_WARNING", "YES", "APPROVED", "ALLOW"}
+POSITIVE_GATE_VALUES = {"yes", "approved", "confirm", "confirmed", "pass", "pass-with-warning", "allow", "true", "done"}
+NOT_APPLICABLE_GATE_VALUES = {"n-a", "n/a", "na", "not-applicable", "not applicable"}
 
 
 def utc_now() -> str:
@@ -77,6 +81,33 @@ def read_json(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError:
         return {}
+
+
+def read_json_with_status(path: Path) -> tuple[dict[str, Any], str, str | None]:
+    if not path.exists():
+        return {}, "missing", None
+    try:
+        return json.loads(path.read_text(encoding="utf-8-sig")), "ok", None
+    except json.JSONDecodeError as exc:
+        return {}, "invalid", str(exc)
+
+
+def preserve_invalid_json(path: Path) -> Path:
+    timestamp = utc_now().replace(":", "").replace("+00:00", "Z")
+    backup_path = path.with_name(f"{path.name}.corrupt-{timestamp}.bak")
+    backup_path.write_text(path.read_text(encoding="utf-8-sig"), encoding="utf-8")
+    return backup_path
+
+
+def require_valid_json(path: Path, description: str) -> dict[str, Any]:
+    payload, status, error = read_json_with_status(path)
+    if status != "invalid":
+        return payload
+    backup_path = preserve_invalid_json(path)
+    raise ValueError(
+        f"{description} is invalid JSON and was preserved at {backup_path}. "
+        f"Repair the file before continuing. Parse error: {error}"
+    )
 
 
 def write_text(path: Path, content: str) -> None:
@@ -176,6 +207,63 @@ def extract_section_items(markdown: str, heading: str) -> list[str]:
             if item and item.lower() != "none":
                 items.append(item)
     return items
+
+
+def extract_section_text(markdown: str, heading: str) -> str:
+    lines = markdown.splitlines()
+    capture = False
+    target = heading.strip().lower()
+    captured: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if capture:
+                break
+            capture = stripped[3:].strip().lower() == target
+            continue
+        if capture:
+            captured.append(line)
+    return "\n".join(captured).strip()
+
+
+def normalize_gate_value(value: str) -> str:
+    lowered = value.strip().lower().replace("_", "-")
+    return " ".join(lowered.split())
+
+
+def gate_is_positive(value: str) -> bool:
+    normalized = normalize_gate_value(value)
+    return normalized in POSITIVE_GATE_VALUES or normalized.upper() in PASS_CONCLUSIONS
+
+
+def gate_is_positive_or_not_applicable(value: str) -> bool:
+    normalized = normalize_gate_value(value)
+    return gate_is_positive(value) or normalized in NOT_APPLICABLE_GATE_VALUES
+
+
+def section_has_substantive_content(markdown: str, heading: str) -> bool:
+    section = extract_section_text(markdown, heading)
+    if not section or text_has_placeholders(section):
+        return False
+    content_lines = [line.strip("- ").strip() for line in section.splitlines() if line.strip()]
+    meaningful = " ".join(content_lines).strip()
+    return bool(meaningful) and meaningful.lower() not in {"none", "pending", "n/a"}
+
+
+def task_intake_review_status(task_intake_text: str) -> dict[str, bool]:
+    return {
+        "raw_requirement_present": section_has_substantive_content(task_intake_text, "Raw Requirement"),
+        "current_implemented_scope_present": section_has_substantive_content(task_intake_text, "Current Implemented Scope"),
+        "confirmed_requirement_present": section_has_substantive_content(task_intake_text, "Confirmed Requirement"),
+        "frozen_requirement_present": section_has_substantive_content(task_intake_text, "Frozen Requirement"),
+        "customer_acknowledged_implementation": gate_is_positive_or_not_applicable(
+            extract_field_value(task_intake_text, "Customer acknowledged current implementation baseline")
+        ),
+        "customer_confirmed_requirement": gate_is_positive(
+            extract_field_value(task_intake_text, "Customer confirmed requirement and scope")
+        ),
+        "development_approved": gate_is_positive(extract_field_value(task_intake_text, "Approved to start development")),
+    }
 
 
 def collect_role_handoffs(handoff_root: Path, active_tasks: list[dict[str, Any]] | None = None) -> dict[str, list[str]]:
@@ -351,12 +439,14 @@ def inspect_project(project_root: Path, intent: str = "auto") -> dict[str, Any]:
     handoff_text = read_text(state_dir / "project-handoff.md")
     acceptance_text = read_text(reports_dir / "acceptance-report.md")
     test_text = read_text(reports_dir / "test-report.md")
+    implementation_summary_text = read_text(reports_dir / "current-implementation-summary.md")
 
-    frozen_requirement_present = "Frozen requirement:" in task_intake_text and "[fill here after planning approval]" not in task_intake_text.lower()
+    task_intake_status = task_intake_review_status(task_intake_text)
     architecture_ready = bool(architecture_text) and not text_has_placeholders(architecture_text)
     task_tree_is_ready = task_tree_ready(state_dir / "task-tree.json")
     core_state_exists = not missing_state_files[:6]
     plan_review = extract_conclusion(read_text(reports_dir / "architecture-review.md"), "Conclusion")
+    plan_review_passed = gate_is_positive(plan_review)
     final_audit = extract_conclusion(acceptance_text, "Final Conclusion")
     test_recommendation = extract_conclusion(test_text, "Recommendation")
 
@@ -364,7 +454,22 @@ def inspect_project(project_root: Path, intent: str = "auto") -> dict[str, Any]:
     testing_allowed = bool(orchestrator_state.get("testing_allowed", False))
     release_allowed = bool(orchestrator_state.get("release_allowed", False))
     scenario = scenario_from_intent(intent, project_root)
-    planning_ready = mode == "project_mode" and core_state_exists and architecture_ready and task_tree_is_ready and frozen_requirement_present
+    implementation_baseline_required = scenario == "mid-stream-takeover" and project_has_existing_context(project_root)
+    implementation_summary_ready = (not implementation_baseline_required) or (
+        bool(implementation_summary_text) and not text_has_placeholders(implementation_summary_text)
+    )
+    planning_ready = (
+        mode == "project_mode"
+        and core_state_exists
+        and architecture_ready
+        and task_tree_is_ready
+        and task_intake_status["frozen_requirement_present"]
+        and plan_review_passed
+        and task_intake_status["customer_confirmed_requirement"]
+        and task_intake_status["development_approved"]
+        and implementation_summary_ready
+        and (not implementation_baseline_required or task_intake_status["customer_acknowledged_implementation"])
+    )
     execution_ready = mode == "project_mode" and planning_ready and execution_allowed and orchestrator_state.get("current_status") in {
         "plan-approved",
         "executing",
@@ -410,6 +515,17 @@ def inspect_project(project_root: Path, intent: str = "auto") -> dict[str, Any]:
         "blocked_items": extract_section_items(handoff_text, "Blocked"),
         "mainline_status": orchestrator_state.get("mainline_status", ""),
         "release_allowed": release_allowed,
+        "plan_review_passed": plan_review_passed,
+        "architecture_ready": architecture_ready,
+        "task_tree_ready": task_tree_is_ready,
+        "implementation_baseline_required": implementation_baseline_required,
+        "implementation_summary_ready": implementation_summary_ready,
+        "raw_requirement_present": task_intake_status["raw_requirement_present"],
+        "confirmed_requirement_present": task_intake_status["confirmed_requirement_present"],
+        "frozen_requirement_present": task_intake_status["frozen_requirement_present"],
+        "customer_acknowledged_implementation": task_intake_status["customer_acknowledged_implementation"],
+        "customer_confirmed_requirement": task_intake_status["customer_confirmed_requirement"],
+        "development_approved": task_intake_status["development_approved"],
         "updated_at": utc_now(),
     }
 

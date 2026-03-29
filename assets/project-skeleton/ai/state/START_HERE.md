@@ -27,10 +27,13 @@
 - Blocker level: none
 - Next owner: orchestrator
 - Current batch: planning bootstrap
+- Review phase: normal-review
+- Review rounds before cabinet: 0 / 4
+- Review rounds after cabinet: 0 / 2
 
 ## Current Next Action
 
-- Bootstrap planning and freeze the initial architecture and task tree before implementation.
+- Freeze the minimum approved baseline, complete document review, and obtain customer confirmation before implementation.
 
 ## Recovery Reading Order
 

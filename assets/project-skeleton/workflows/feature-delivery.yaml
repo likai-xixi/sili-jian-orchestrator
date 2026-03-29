@@ -29,8 +29,48 @@ steps:
     role: gongbu
     agent_id: gongbu
     outputs: [frontend-implementation, gongbu-handoff, gongbu-self-check]
-  - id: bingbu-testing
+  - id: libu2-cross-review
     depends_on: [libu2-implementation, hubu-implementation, gongbu-implementation]
+    role: libu2
+    agent_id: libu2
+    outputs: [libu2-review-handoff]
+  - id: hubu-cross-review
+    depends_on: [libu2-implementation, hubu-implementation, gongbu-implementation]
+    role: hubu
+    agent_id: hubu
+    outputs: [hubu-review-handoff]
+  - id: gongbu-cross-review
+    depends_on: [libu2-implementation, hubu-implementation, gongbu-implementation]
+    role: gongbu
+    agent_id: gongbu
+    outputs: [gongbu-review-handoff]
+  - id: bingbu-cross-review
+    depends_on: [libu2-implementation, hubu-implementation, gongbu-implementation]
+    role: bingbu
+    agent_id: bingbu
+    outputs: [bingbu-review-handoff]
+  - id: libu-cross-review
+    depends_on: [libu2-implementation, hubu-implementation, gongbu-implementation]
+    role: libu
+    agent_id: libu
+    outputs: [libu-review-handoff]
+  - id: xingbu-cross-review
+    depends_on: [libu2-implementation, hubu-implementation, gongbu-implementation]
+    role: xingbu
+    agent_id: xingbu
+    outputs: [xingbu-review-handoff]
+  - id: duchayuan-cross-review
+    depends_on: [libu2-implementation, hubu-implementation, gongbu-implementation]
+    role: duchayuan
+    agent_id: duchayuan
+    outputs: [duchayuan-review-handoff]
+  - id: department-review
+    depends_on: [libu2-cross-review, hubu-cross-review, gongbu-cross-review, bingbu-cross-review, libu-cross-review, xingbu-cross-review, duchayuan-cross-review]
+    role: orchestrator
+    agent_id: orchestrator
+    outputs: [department-approval-matrix]
+  - id: bingbu-testing
+    depends_on: [department-review]
     role: bingbu
     agent_id: bingbu
     outputs: [test-report, bingbu-handoff]
@@ -44,13 +84,8 @@ steps:
     role: xingbu
     agent_id: xingbu
     outputs: [gate-report, xingbu-handoff]
-  - id: department-review
-    depends_on: [xingbu-release-check]
-    role: orchestrator
-    agent_id: orchestrator
-    outputs: [department-approval-matrix]
   - id: final-audit
-    depends_on: [department-review]
+    depends_on: [xingbu-release-check]
     role: duchayuan
     agent_id: duchayuan
     outputs: [acceptance-report]
@@ -67,9 +102,11 @@ steps:
 review_points:
   - plan-impact
   - department-review
+  - six-department-cross-review
   - final-audit
 recovery_points:
   - after-intake
   - after-plan-approval
   - after-implementation
+  - after-cross-review
   - after-department-review

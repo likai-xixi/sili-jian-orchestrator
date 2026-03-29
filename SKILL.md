@@ -32,6 +32,7 @@ If the current directory is an OpenClaw workspace root:
 - explain that this root may host multiple skills or shared workspace assets
 - do not treat it as a single business project
 - require the user to switch into the actual target project directory before bootstrap
+- if the user is still defining a brand new project from this workspace root, use `scripts/project_intake.py` to capture the requirement and create the governed project directory first
 
 If the current directory is a target project:
 - proceed from first-run guidance into project inspection
@@ -266,3 +267,10 @@ Use these scripts when you need deterministic behavior:
 - `scripts/build_dispatch_payload.py`
 - `scripts/update_agent_sessions.py`
 - `scripts/ensure_openclaw_agents.py`
+- `scripts/session_registry.py`
+- `scripts/workflow_engine.py`
+- `scripts/openclaw_adapter.py`
+- `scripts/run_orchestrator.py`
+- `scripts/completion_consumer.py`
+- `scripts/context_rollover.py`
+- `scripts/project_intake.py`

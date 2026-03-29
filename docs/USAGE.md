@@ -22,6 +22,7 @@
 2. `workspace_root_mode`
    - 当前目录是 OpenClaw workspace 根目录
    - 不应把它误当成单一业务项目目录
+   - 如果你还没有真实项目目录，可以先在这里使用 `scripts/project_intake.py` 记录需求并创建新的受治理项目
 3. `project_mode`
    - 当前目录是真实项目目录
    - 可以执行接管、治理初始化、方案推进等动作
@@ -48,6 +49,20 @@
    - 最安全的下一步
    - 建议我下一条输入什么提示词
 6. 在完成上述检查前，不要进入实现阶段
+```
+
+如果你当前就在 `workspace_root_mode`，而且需求还没有落成真实项目目录，可以先执行：
+
+```bash
+python scripts/project_intake.py <workspace-root> --requirement "你的项目需求，项目名为 xxx"
+```
+
+如果需求里已经带了项目名，脚本会直接识别并把 intake 状态推进到可创建。
+
+然后再执行：
+
+```bash
+python scripts/project_intake.py <workspace-root> --project-name xxx --activate
 ```
 
 ### 2. 跑首轮接管检查
@@ -222,6 +237,8 @@
 - [提示词文档](./PROMPTS.md)
 - [按推进顺序手册](./FLOWS.md)
 - [状态检查与修复](./STATE-TOOLS.md)
+- [OpenClaw 自治运行蓝图](./OPENCLAW-AUTONOMY-BLUEPRINT.md)
+- [下一线程交接说明](./NEXT-THREAD-HANDOFF.md)
 
 ## 十、本地与远端 CI
 

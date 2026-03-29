@@ -23,7 +23,7 @@ steps:
     depends_on: [freeze-initial-plan]
     role: duchayuan
     agent_id: duchayuan
-    outputs: [architecture-review]
+    outputs: [architecture-review, reviewed-task-intake]
   - id: update-state-and-handoff
     depends_on: [plan-audit]
     role: orchestrator

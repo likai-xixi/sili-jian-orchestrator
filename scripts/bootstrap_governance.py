@@ -4,10 +4,41 @@ import argparse
 import shutil
 from pathlib import Path
 
-from common import TEST_DIRS, read_json, read_text, write_json, write_text
+from common import TEST_DIRS, project_has_existing_context, read_json, read_text, write_json, write_text
+from sync_project_tools import assert_project_tools_synced
 
 
 TEXT_EXTENSIONS = {".md", ".json", ".yaml", ".yml"}
+RUNTIME_TOOL_FILES = [
+    "build_dispatch_payload.py",
+    "recovery_summary.py",
+    "automation_control.py",
+    "change_request_control.py",
+    "close_session.py",
+    "natural_language_control.py",
+    "replan_change_request.py",
+    "provider_evidence.py",
+    "host_interface_probe.py",
+    "runtime_environment.py",
+    "environment_bootstrap.py",
+    "openclaw_runtime_bridge.py",
+    "repo_command_detector.py",
+    "evidence_collector.py",
+    "escalation_manager.py",
+    "parent_session_recovery.py",
+    "session_registry.py",
+    "workflow_engine.py",
+    "openclaw_adapter.py",
+    "completion_consumer.py",
+    "inbox_watcher.py",
+    "orchestrator_local_steps.py",
+    "context_rollover.py",
+    "run_orchestrator.py",
+    "runtime_loop.py",
+    "project_intake.py",
+    "configure_review_controls.py",
+    "resume_customer_decision.py",
+]
 
 
 def render_template(text: str, project_name: str, project_id: str) -> str:
@@ -31,7 +62,9 @@ def replace_line(text: str, prefix: str, new_line: str) -> str:
 def detect_bootstrap_scenario(project_root: Path, explicit: str) -> str:
     if explicit and explicit != "auto":
         return explicit
-    if (project_root / ".git").exists() or (project_root / "docs").exists() or (project_root / "src").exists() or (project_root / "ai").exists():
+    if project_has_existing_context(project_root):
+        return "mid-stream-takeover"
+    if (project_root / "ai").exists() or (project_root / "workflows").exists() or (project_root / "tests").exists():
         return "mid-stream-takeover"
     return "new-project"
 
@@ -41,6 +74,17 @@ def ensure_test_layers(project_root: Path) -> None:
     tests_root.mkdir(parents=True, exist_ok=True)
     for name in TEST_DIRS:
         (tests_root / name).mkdir(parents=True, exist_ok=True)
+
+
+def install_runtime_tools(skill_root: Path, project_root: Path, force: bool) -> None:
+    tools_dir = project_root / "ai" / "tools"
+    tools_dir.mkdir(parents=True, exist_ok=True)
+    for name in RUNTIME_TOOL_FILES:
+        source = skill_root / "scripts" / name
+        target = tools_dir / name
+        if target.exists() and not force:
+            continue
+        shutil.copy2(source, target)
 
 
 def apply_takeover_defaults(project_root: Path) -> None:
@@ -55,8 +99,14 @@ def apply_takeover_defaults(project_root: Path) -> None:
         orchestrator_state["current_phase"] = "planning"
         orchestrator_state["current_status"] = "draft"
         orchestrator_state["current_workflow"] = "takeover-project"
-        orchestrator_state["primary_goal"] = "Backfill governance, repair planning artifacts, and freeze the first takeover plan."
-        orchestrator_state["next_action"] = "Inspect the existing project context and create architecture.md plus task-tree.json for takeover planning."
+        orchestrator_state["primary_goal"] = (
+            "Backfill governance, freeze the current implementation baseline, review planning docs, "
+            "and obtain customer confirmation before development."
+        )
+        orchestrator_state["next_action"] = (
+            "Inspect the existing project, write current-implementation-summary.md, then align requirements "
+            "with the customer before freezing the takeover plan."
+        )
         orchestrator_state["next_owner"] = "orchestrator"
         orchestrator_state["active_tasks"] = [
             {
@@ -66,18 +116,33 @@ def apply_takeover_defaults(project_root: Path) -> None:
                 "handoff_path": "ai/handoff/orchestrator/active/TAKEOVER-ASSESSMENT.md",
             }
         ]
-        orchestrator_state["last_heartbeat_goal"] = "Backfill governance and establish a takeover-ready planning baseline."
-        orchestrator_state["last_heartbeat_reason"] = "This is an in-progress project, so governance and planning must be repaired before execution."
+        orchestrator_state["last_heartbeat_goal"] = "Backfill governance and establish a customer-confirmed takeover baseline."
+        orchestrator_state["last_heartbeat_reason"] = (
+            "This is an in-progress project, so the current implementation and next-scope documents must be "
+            "reviewed and confirmed before execution."
+        )
         write_json(orchestrator_state_path, orchestrator_state)
 
     handoff_text = read_text(handoff_path)
     if handoff_text:
         handoff_text = replace_line(handoff_text, "- Current workflow:", "- Current workflow: takeover-project")
-        handoff_text = replace_line(handoff_text, "- Main objective:", "- Main objective: backfill governance gaps and freeze the first takeover plan")
-        handoff_text = replace_line(handoff_text, "- Next action:", "- Next action: inspect project context and create architecture plus task tree")
+        handoff_text = replace_line(
+            handoff_text,
+            "- Main objective:",
+            "- Main objective: freeze the current implementation baseline, align scope with the customer, and then approve development",
+        )
+        handoff_text = replace_line(
+            handoff_text,
+            "- Next action:",
+            "- Next action: inspect current implementation, produce implementation summary, then repair architecture plus task tree",
+        )
         handoff_text = replace_line(handoff_text, "- Next owner:", "- Next owner: orchestrator")
-        handoff_text = replace_line(handoff_text, "- Governance skeleton created", "- Governance skeleton created and takeover mode activated")
-        handoff_text = replace_line(handoff_text, "- Initial planning", "- Takeover assessment and planning repair")
+        handoff_text = replace_line(
+            handoff_text,
+            "- Governance skeleton created",
+            "- Governance skeleton created, takeover mode activated, and customer confirmation gate enabled",
+        )
+        handoff_text = replace_line(handoff_text, "- Initial planning", "- Takeover assessment, implementation summary, and planning repair")
         write_text(handoff_path, handoff_text)
 
     start_here_text = read_text(start_here_path)
@@ -87,8 +152,8 @@ def apply_takeover_defaults(project_root: Path) -> None:
         start_here_text = replace_line(start_here_text, "- Current batch:", "- Current batch: takeover repair")
         start_here_text = replace_line(
             start_here_text,
-            "- Bootstrap planning and freeze the initial architecture and task tree before implementation.",
-            "- Backfill governance, inspect the existing system, and freeze architecture plus task tree before implementation.",
+            "- Freeze the minimum approved baseline, complete document review, and obtain customer confirmation before implementation.",
+            "- Backfill governance, inspect the existing system, summarize the current implementation, and obtain customer confirmation before implementation.",
         )
         write_text(start_here_path, start_here_text)
 
@@ -100,6 +165,7 @@ def apply_takeover_defaults(project_root: Path) -> None:
 
 - Original condition: Existing project detected; governance coverage is incomplete and must be backfilled before execution resumes.
 - Governance gaps: Missing or partial state files, reports, workflow templates, test structure, and recovery artifacts.
+- Current implementation summary shared with customer: pending
 - Mainline status: Unknown until architecture and task-tree are reconstructed from the current codebase and docs.
 - Immediate risks: State drift, missing handoff continuity, missing test baseline, and incorrect workflow selection.
 
@@ -107,7 +173,8 @@ def apply_takeover_defaults(project_root: Path) -> None:
 
 - Proceed in `mid-stream-takeover` mode.
 - Backfill governance first.
-- Freeze architecture and task tree before execution.
+- Freeze current implementation scope first, then architecture and task tree before execution.
+- Capture explicit customer confirmation on current behavior and approved next scope before execution.
 """,
     )
 
@@ -121,8 +188,8 @@ def apply_takeover_defaults(project_root: Path) -> None:
 - status: in-progress
 - task_id: TAKEOVER-ASSESSMENT
 - workflow_step_id: inspect-governance
-- summary: Inspect the existing project, backfill governance gaps, and establish the first takeover planning baseline.
-- files_touched: ai/state/project-takeover.md, ai/state/architecture.md, ai/state/task-tree.json, ai/state/project-handoff.md
+- summary: Inspect the existing project, summarize the current implementation, backfill governance gaps, and establish the first takeover planning baseline.
+- files_touched: ai/reports/current-implementation-summary.md, ai/state/project-takeover.md, ai/state/architecture.md, ai/state/task-tree.json, ai/state/project-handoff.md
 - blockers: none
 - next_reviewer: neige
 - updated_at: [fill here]
@@ -157,6 +224,8 @@ def main() -> None:
     project_id = args.project_id or project_root.name
     scenario = detect_bootstrap_scenario(project_root, args.scenario)
 
+    assert_project_tools_synced(skill_root)
+
     project_root.mkdir(parents=True, exist_ok=True)
     for item in skeleton_root.rglob("*"):
         relative = item.relative_to(skeleton_root)
@@ -174,6 +243,7 @@ def main() -> None:
             shutil.copy2(item, target)
 
     ensure_test_layers(project_root)
+    install_runtime_tools(skill_root, project_root, args.force)
     apply_scenario_defaults(project_root, scenario)
     print(f"Bootstrapped governance into {project_root} with scenario={scenario}")
 

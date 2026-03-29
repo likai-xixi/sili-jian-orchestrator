@@ -8,7 +8,7 @@ steps:
     depends_on: [identify-project]
     role: orchestrator
     agent_id: orchestrator
-    outputs: [takeover-report]
+    outputs: [takeover-report, current-implementation-summary]
   - id: backfill-governance
     depends_on: [inspect-governance]
     role: orchestrator
@@ -18,7 +18,7 @@ steps:
     depends_on: [backfill-governance]
     role: neige
     agent_id: neige
-    outputs: [repaired-architecture, repaired-task-tree]
+    outputs: [repaired-architecture, repaired-task-tree, reviewed-task-intake]
   - id: backfill-tests
     depends_on: [planning-repair]
     role: bingbu

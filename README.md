@@ -55,7 +55,7 @@
 - `references/`：制度规则、调度规则、恢复规则
 - `assets/project-skeleton/`：治理骨架模板
 - `assets/output-templates/`：首轮接管、状态修复、任务卡等输出模板
-- `scripts/`：治理初始化、状态检查、修复、门禁、调度 payload 生成等脚本
+- `scripts/`：治理初始化、状态检查、修复、门禁、调度 payload 生成，以及 workspace 根目录下的新项目 intake 脚本
 - `tests/`：技能自身脚本的回归测试
 - `docs/`：中文安装、使用、提示词与状态工具说明
 
@@ -105,6 +105,8 @@
 - [提示词文档](./docs/PROMPTS.md)
 - [按推进顺序手册](./docs/FLOWS.md)
 - [状态检查与修复](./docs/STATE-TOOLS.md)
+- [OpenClaw 自治运行蓝图](./docs/OPENCLAW-AUTONOMY-BLUEPRINT.md)
+- [下一线程交接说明](./docs/NEXT-THREAD-HANDOFF.md)
 
 ## 第一次使用建议
 
@@ -127,6 +129,8 @@
 6. 如果当前目录已经是项目目录，再继续输出首轮接管结果
 7. 在完成上述检查前，不要进入实现阶段
 ```
+
+如果你当前停留在 workspace 根目录，而且需求还没有落成具体项目目录，可以先用 `scripts/project_intake.py` 记录需求、确认项目名，再自动创建新的受治理项目目录。
 
 ## 维护说明
 
