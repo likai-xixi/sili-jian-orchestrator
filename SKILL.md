@@ -82,14 +82,14 @@ When OpenClaw provides peer department agents, default to real dispatch rather t
 
 Use these exact `agentId` values:
 
-- `neige` for 内阁
-- `bingbu` for 兵部
-- `libu2` for 吏部
-- `hubu` for 户部
-- `gongbu` for 工部
-- `xingbu` for 刑部
-- `libu` for 礼部
-- `duchayuan` for 都察院
+- `neige` for ??
+- `bingbu` for ??
+- `libu2` for ??
+- `hubu` for ??
+- `gongbu` for ??
+- `xingbu` for ??
+- `libu` for ??
+- `duchayuan` for ???
 
 Dispatch rules:
 

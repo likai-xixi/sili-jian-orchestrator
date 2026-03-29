@@ -89,6 +89,47 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def resolve_project_root(start: Path) -> Path:
+    candidate = start.resolve()
+    if candidate.is_file():
+        candidate = candidate.parent
+    for current in [candidate, *candidate.parents]:
+        if (current / "ai" / "state").exists() or (current / "workflows").exists():
+            return current
+    return candidate
+
+
+def ensure_handoff_stub(project_root: Path, handoff_path: str, card: dict[str, str]) -> Path:
+    candidate = Path(handoff_path)
+    if not candidate.is_absolute():
+        candidate = project_root / candidate
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    if candidate.exists():
+        return candidate
+
+    role = card.get("target_agent") or card.get("target_agent_id") or "department"
+    summary = card.get("goal") or card.get("expected_output") or card.get("title") or "Pending task execution."
+    touched = card.get("allowed_paths") or "[fill here]"
+    next_reviewer = card.get("downstream_reviewers") or "orchestrator"
+    write_text(
+        candidate,
+        f"""# Role Handoff
+
+- title: {card.get('title', '')}
+- status: in-progress
+- task_id: {card.get('task_id', '')}
+- workflow_step_id: {card.get('workflow_step_id', '')}
+- summary: {summary}
+- files_touched: {touched}
+- blockers: none
+- next_reviewer: {next_reviewer}
+- role: {role}
+- updated_at: [fill here]
+""",
+    )
+    return candidate
+
+
 def text_has_placeholders(text: str) -> bool:
     lowered = text.lower()
     markers = [

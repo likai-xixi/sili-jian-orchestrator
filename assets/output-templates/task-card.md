@@ -11,6 +11,7 @@ Rules:
 - `allowed_paths`: comma-separated repo-relative paths only
 - `forbidden_paths`: comma-separated protected or out-of-scope paths
 - `handoff_path`: must point to `ai/handoff/<role>/active/<task-id>.md`
+- The payload builder will create the handoff stub automatically when the file does not exist yet
 - `review_required`: `yes` or `no`
 - `priority`: one of `P0`, `P1`, `P2`, `P3`, `P4`
 - `testing_requirement`: name the exact test layer(s) and expected coverage

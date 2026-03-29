@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from common import read_text
+from common import ensure_handoff_stub, read_text, resolve_project_root
 
 
 MULTILINE_FIELDS = {
@@ -86,9 +86,19 @@ def main() -> None:
     parser.add_argument("task_card", help="Path to task-card markdown")
     parser.add_argument("--mode", choices=["spawn", "send"], required=True)
     parser.add_argument("--session-key", help="Required for send mode")
+    parser.add_argument("--project-root", help="Optional explicit project root for resolving relative handoff paths")
     args = parser.parse_args()
 
-    card = parse_task_card(Path(args.task_card))
+    task_card_path = Path(args.task_card).resolve()
+    card = parse_task_card(task_card_path)
+    project_root = Path(args.project_root).resolve() if args.project_root else resolve_project_root(task_card_path)
+    handoff_path = card.get("handoff_path", "").strip()
+    if handoff_path:
+        ensured = ensure_handoff_stub(project_root, handoff_path, card)
+        if not Path(handoff_path).is_absolute():
+            card["handoff_path"] = str(ensured.relative_to(project_root)).replace("\\", "/")
+        else:
+            card["handoff_path"] = str(ensured)
     agent_id = card.get("target_agent_id") or card.get("target_agent")
     prompt = build_prompt(card)
 
