@@ -1,0 +1,27 @@
+name: Project Repair Brief
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-repair-brief:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate repair brief
+        run: python ai/tools/render_agent_repair_brief.py .
+
+      - name: Upload repair brief
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-repair-brief
+          path: |
+            ai/reports/agent-repair-brief.md
+            ai/reports/agent-repair-brief.json

@@ -196,7 +196,9 @@
 - `ai/tools/validate_state.py`
 - `ai/tools/validate_gates.py`
 - `ai/tools/run_project_guard.py`
+- `ai/tools/render_agent_repair_brief.py`
 - `.github/workflows/project-guard.yml`
+- `.github/workflows/project-repair-brief.yml`
 
 ### 目标项目 push 之后会发生什么
 
@@ -212,6 +214,25 @@ GitHub Actions 就会自动执行项目级守门。
 1. 状态一致性
 2. active handoff 完整性
 3. 当前阶段门禁
+
+### 检测之后如何直接交给 agent
+
+除了自动守门外，目标项目还会得到一个手动触发的 GitHub workflow：
+
+- `project-repair-brief.yml`
+
+你可以在 GitHub Actions 页面手动点它。执行后会生成：
+
+- `ai/reports/agent-repair-brief.md`
+- `ai/reports/agent-repair-brief.json`
+
+这份简报会把：
+
+1. 当前问题
+2. 修复建议
+3. 可直接复制给 agent 的提示词
+
+一起整理好，方便你交给司礼监或对应部门 agent 去出方案、修复、再提交。
 
 它不会在项目仍处于 planning 阶段时强行要求通过最终发布门禁，因此对新接管项目也更友好。
 

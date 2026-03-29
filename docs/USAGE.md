@@ -195,7 +195,26 @@
 
 如果治理状态明显漂移，CI 会直接失败，提醒先修治理再继续推进。
 
-## 八、文档导航
+## 八、手动生成可复制给 agent 的修复简报
+
+目标项目还会自动得到：
+
+- `.github/workflows/project-repair-brief.yml`
+
+你可以在 GitHub Actions 页面手动点击它。运行后会生成：
+
+- `ai/reports/agent-repair-brief.md`
+- `ai/reports/agent-repair-brief.json`
+
+这份修复简报会包含：
+
+1. 当前检测到的问题
+2. 建议的修复方向
+3. 一段可以直接复制给 agent 的中文提示词
+
+这样你就不需要自己再整理问题描述了。
+
+## 九、文档导航
 
 - [安装说明](./INSTALL.md)
 - [简易版文档](./SIMPLE.md)
@@ -204,7 +223,7 @@
 - [按推进顺序手册](./FLOWS.md)
 - [状态检查与修复](./STATE-TOOLS.md)
 
-## 九、本地与远端 CI
+## 十、本地与远端 CI
 
 ### 本地一键校验
 

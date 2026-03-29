@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 from common import write_text
+from render_agent_repair_brief import render_markdown as render_repair_markdown
+from render_agent_repair_brief import build_findings
 from validate_gates import render_markdown as render_gates_markdown
 from validate_gates import validate as validate_gates
 from validate_state import render_markdown as render_state_markdown
@@ -22,6 +24,10 @@ def main() -> None:
     write_text(reports_dir / "state-validation.md", render_state_markdown(state_report))
     write_text(reports_dir / "gate-validation.md", render_gates_markdown(gate_report))
     write_text(
+        reports_dir / "agent-repair-brief.md",
+        render_repair_markdown(project_root, state_report, gate_report, build_findings(state_report, gate_report)),
+    )
+    write_text(
         reports_dir / "project-guard-summary.json",
         json.dumps({"state": state_report, "gates": gate_report}, indent=2, ensure_ascii=False),
     )
@@ -29,6 +35,7 @@ def main() -> None:
     print("[Project Guard] state_consistent =", state_report.get("state_consistent"))
     print("[Project Guard] phase_gate_passed =", gate_report.get("phase_gate_passed"))
     print("[Project Guard] final_gate_passed =", gate_report.get("final_gate_passed"))
+    print("[Project Guard] agent_repair_brief = ai/reports/agent-repair-brief.md")
 
     if not state_report.get("state_consistent"):
         raise SystemExit(1)

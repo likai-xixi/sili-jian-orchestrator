@@ -16,6 +16,7 @@ PY_COMPILE_TARGETS = [
     REPO_ROOT / "assets" / "project-skeleton" / "ai" / "tools" / "validate_state.py",
     REPO_ROOT / "assets" / "project-skeleton" / "ai" / "tools" / "validate_gates.py",
     REPO_ROOT / "assets" / "project-skeleton" / "ai" / "tools" / "run_project_guard.py",
+    REPO_ROOT / "assets" / "project-skeleton" / "ai" / "tools" / "render_agent_repair_brief.py",
     REPO_ROOT / "tests" / "test_skill_scripts.py",
 ]
 

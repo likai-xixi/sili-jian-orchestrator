@@ -76,6 +76,21 @@
 2. active handoff 是否存在
 3. 当前阶段门禁是否通过
 
+另外，目标项目还会得到一个可手动点击的 workflow：
+
+- `.github/workflows/project-repair-brief.yml`
+
+它会生成：
+
+- `ai/reports/agent-repair-brief.md`
+- `ai/reports/agent-repair-brief.json`
+
+其中包含：
+
+1. 当前问题清单
+2. 建议的修复方向
+3. 一段可直接复制给 agent 的中文提示词
+
 也就是说：
 
 - 本仓库自己的 CI：守这个技能仓库本身

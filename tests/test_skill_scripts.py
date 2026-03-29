@@ -49,7 +49,9 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
 
             self.assertTrue((project_root / "ai" / "handoff" / "orchestrator" / "active" / "TAKEOVER-ASSESSMENT.md").exists())
             self.assertTrue((project_root / "ai" / "tools" / "run_project_guard.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "render_agent_repair_brief.py").exists())
             self.assertTrue((project_root / ".github" / "workflows" / "project-guard.yml").exists())
+            self.assertTrue((project_root / ".github" / "workflows" / "project-repair-brief.yml").exists())
 
     def test_build_dispatch_payload_creates_handoff_stub_and_delete_cleanup(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -325,6 +327,10 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(runner.returncode, 0, runner.stderr)
             self.assertTrue((project_root / "ai" / "reports" / "state-validation.md").exists())
             self.assertTrue((project_root / "ai" / "reports" / "gate-validation.md").exists())
+            self.assertTrue((project_root / "ai" / "reports" / "agent-repair-brief.md").exists())
+            repair_brief = (project_root / "ai" / "reports" / "agent-repair-brief.md").read_text(encoding="utf-8")
+            self.assertIn("Copy Prompt", repair_brief)
+            self.assertIn("使用 $sili-jian-orchestrator", repair_brief)
 
 
 if __name__ == "__main__":
