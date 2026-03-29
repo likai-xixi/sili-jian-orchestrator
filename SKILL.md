@@ -82,14 +82,14 @@ When OpenClaw provides peer department agents, default to real dispatch rather t
 
 Use these exact `agentId` values:
 
-- `neige` for ??
-- `bingbu` for ??
-- `libu2` for ??
-- `hubu` for ??
-- `gongbu` for ??
-- `xingbu` for ??
-- `libu` for ??
-- `duchayuan` for ???
+- `neige` for architecture clarification, planning, and requirement shaping
+- `bingbu` for unit, integration, regression, and takeover test work
+- `libu2` for backend logic, APIs, services, and business rules
+- `hubu` for database, migrations, SQL, and data consistency
+- `gongbu` for frontend UI, interaction, and state management
+- `xingbu` for build, release, deployment, rollback, and security checks
+- `libu` for documentation, handoff, change summary, and release notes
+- `duchayuan` for plan audit, conflict arbitration, and final acceptance
 
 Dispatch rules:
 
@@ -100,7 +100,7 @@ Dispatch rules:
 - Always record reusable session keys in `ai/state/agent-sessions.json`.
 - Before first dispatch, verify the required peer agents exist via `openclaw agents list --json`; if CLI inspection fails, use `scripts/ensure_openclaw_agents.py` fallback parsing before claiming agents are missing.
 
-司礼监 should not spend long stretches doing backend, database, frontend, testing, docs, release, or final audit work directly when the peer agent exists and the task can be delegated safely.
+The orchestrator should not spend long stretches doing backend, database, frontend, testing, docs, release, or final audit work directly when the peer agent exists and the task can be delegated safely.
 
 ## Intake Workflow
 

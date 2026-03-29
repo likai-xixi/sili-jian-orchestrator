@@ -1,209 +1,196 @@
-# 详细版使用文档
+# 详细版文档
 
-这份文档适合正式接管项目、做长期治理、恢复推进和多部门调度。
+这份文档面向正式接手项目、长期推进、需要恢复与门禁闭环的使用者。
 
 ## 一、技能定位
 
-`sili-jian-orchestrator` 不是普通的编码技能，而是一个治理优先、恢复优先、调度优先的总控技能。
+`sili-jian-orchestrator` 不是普通编码技能，而是“治理优先”的总调度技能。它的核心职责是：
 
-它负责：
+1. 接收需求
+2. 识别项目
+3. 判断场景
+4. 建立和维护治理体系
+5. 组织方案
+6. 组织执行
+7. 组织测试
+8. 组织评审
+9. 组织恢复
+10. 维护状态、交接、门禁和归档
 
-- 识别项目
-- 判断场景
-- 建治理骨架
-- 建状态机
-- 维护交接与恢复入口
-- 派发内阁、都察院、六部任务
-- 组织测试、审批、终审与收口
+## 二、四类核心场景
 
-## 二、使用原则
+### 1. 新建项目
 
-### 1. 先接管，后执行
+目标是先建立治理骨架，再进入方案阶段。
 
-收到项目型需求时，不应该直接开始开发。
+### 2. 中途接管项目
 
-应先做：
+目标是先盘点现状、补齐治理、恢复状态，再继续推进。
 
-1. 目录模式识别
-2. first-run 引导
-3. peer-agent 检查
-4. 首轮接管盘点
-5. 判断是否允许进入执行阶段
+### 3. 恢复会话
 
-### 2. 先治理，后推进
+目标是先读取恢复入口、状态、报告、handoff，再生成 recovery summary。
 
-如果项目缺少治理骨架，优先补：
+### 4. 新功能接入既有治理体系
 
-- `ai/state/*`
-- `ai/reports/*`
-- `ai/handoff/*`
-- `tests/*`
-- `workflows/*`
-- `docs/*`
+目标是先进入 requirements pool，再判断是否需要重新进入方案审批。
 
-### 3. 先方案，后开发
+## 三、目录模式与项目目录
 
-对于模糊需求或影响架构的变更，优先进入：
+技能会区分：
 
-- 需求澄清
-- 方案冻结
-- 审批
+1. `skill_bundle_mode`
+2. `workspace_root_mode`
+3. `project_mode`
+4. `unknown_mode`
 
-再进入执行。
+只有在 `project_mode` 下，才允许往业务项目写入 `ai/`、`tests/`、`workflows/` 等治理骨架。
 
-## 三、推荐工作方式
+如果当前 agent 的 workspace 不是业务项目根目录，应使用“指定项目目录接管”的提示词，把明确的项目绝对路径告诉技能。
 
-### 场景 A：在技能目录里测试
+## 四、治理骨架内容
 
-适合验证技能是否安装成功、首次引导是否生效。
+治理初始化后，项目目录至少应出现：
 
-推荐提示词：
+- `ai/state/`
+- `ai/reports/`
+- `ai/handoff/`
+- `ai/runs/`
+- `ai/prompts/`
+- `ai/logs/`
+- `tests/`
+- `workflows/`
+- `docs/`
 
-```text
-使用 $sili-jian-orchestrator 对当前目录执行首次启用引导。
+其中核心文件至少包括：
 
-当前目录大概率是技能封装目录，不是业务项目目录。
-要求：
-1. 不要直接开发
-2. 先判断当前目录模式
-3. 检查 OpenClaw 中司礼监、内阁、都察院、六部 agent 是否已就绪
-4. 如果这里是技能目录，只输出首次引导结果，不要创建 ai/、tests/、workflows/ 等项目治理文件
-5. 输出：
-   - 当前目录模式
-   - peer-agent 就绪情况
-   - 当前环境说明
-   - 最安全的下一步
-   - 建议我下一条输入什么提示词
-```
+- `ai/state/START_HERE.md`
+- `ai/state/project-meta.json`
+- `ai/state/project-handoff.md`
+- `ai/state/orchestrator-state.json`
+- `ai/state/task-tree.json`
+- `ai/state/approval-policy.md`
+- `ai/state/gate-rules.md`
+- `ai/state/testing-guidelines.md`
+- `ai/reports/test-report.md`
+- `ai/reports/acceptance-report.md`
+- `ai/reports/department-approval-matrix.md`
 
-### 场景 B：在真实项目目录中正式接管
+## 五、状态机与放行开关
 
-推荐提示词：
+状态文件里至少有两类信息：
 
-```text
-使用 $sili-jian-orchestrator 接管当前项目，并先执行首次启用引导，不得直接开发。
+### 1. 阶段 / 状态
 
-要求：
-1. 先判断当前目录是否为项目根目录
-2. 检查 OpenClaw 中司礼监、内阁、都察院、六部 agent 是否已就绪
-3. 执行首轮接管检查
-4. 检查项目识别、ai/、tests/、workflows/、交接入口、状态文件、审批规则、测试规则、工作流模板、步骤快照、任务卡模板
-5. 输出首次引导结果，至少包含：
-   - 当前目录模式
-   - peer-agent 就绪情况
-   - 当前环境说明
-   - 最安全的下一步
-   - 建议我下一条输入什么提示词
-6. 再输出首轮接管结果，至少包含：
-   - 当前项目识别结果
-   - 当前属于哪种场景
-   - ai/ 是否齐全
-   - tests/ 是否齐全
-   - workflows/ 是否齐全
-   - 是否存在显式状态机
-   - 是否存在最近步骤快照
-   - 缺失的治理文件
-   - 缺失的测试体系
-   - 缺失的 workflow 模板
-   - 缺失的恢复机制
-   - 需要先创建的文件和目录
-   - 是否具备方案阶段条件
-   - 是否具备执行阶段条件
-   - 是否具备测试阶段条件
-   - 第一轮 next_action
-   - 当前是否允许立即进入执行阶段
-7. 在完成上述检查前，不得进入实现阶段
-```
+例如：
 
-### 场景 C：接管指定项目目录
+- `current_phase`
+- `current_status`
+- `current_workflow`
 
-如果当前 agent 固定在某个 workspace，但真正要接管的项目在另一个路径，请明确指定目录。
+### 2. 放行开关
 
-推荐提示词：
+例如：
 
-```text
-使用 $sili-jian-orchestrator 接管指定项目，不要把当前 workspace 根目录当成业务项目目录。
+- `execution_allowed`
+- `testing_allowed`
+- `release_allowed`
 
-目标项目根目录：
-<项目绝对路径>
+后面这三个不是阶段名，而是门禁开关：
 
-要求：
-1. 不要把当前 workspace 根目录当成业务项目根目录
-2. 将 <项目绝对路径> 视为唯一目标项目目录
-3. 先对 <项目绝对路径> 执行首次启用引导
-4. 检查 OpenClaw 中司礼监、内阁、都察院、六部 agent 是否已就绪
-5. 再对 <项目绝对路径> 执行首轮接管检查
-6. 检查项目识别、ai/、tests/、workflows/、交接入口、状态文件、审批规则、测试规则、工作流模板、步骤快照、任务卡模板
-7. 输出首次引导结果和首轮接管结果
-8. 如需初始化治理骨架，只允许写入 <项目绝对路径>
-9. 在完成上述检查前，不得进入实现阶段
-```
+- `execution_allowed = false`：当前不能进入实现
+- `testing_allowed = false`：当前不能进入正式测试
+- `release_allowed = false`：当前不能进入发布
 
-## 四、典型推进顺序
+这三项在 `planning / draft` 阶段为 `false` 是正常的。
 
-推荐按照下面的节奏推进：
+## 六、真实 peer-agent 调度
 
-1. first-run 引导
+当 OpenClaw 提供同级部门 agent 时，技能默认按真实 `agentId` 派发：
+
+- `neige`：内阁，负责方案与架构
+- `duchayuan`：都察院，负责终审与裁决
+- `libu2`：吏部，负责后端与业务逻辑
+- `hubu`：户部，负责数据库与迁移
+- `gongbu`：工部，负责前端与交互
+- `bingbu`：兵部，负责测试
+- `libu`：礼部，负责文档、交接、变更摘要
+- `xingbu`：刑部，负责构建、发布、安全与回滚
+
+### 派发规则
+
+1. 一次性任务优先 `sessions_spawn`
+2. 多轮持续会话优先 `sessions_send`
+3. `spawn` 默认 `cleanup: "delete"`
+4. 派发前先生成任务卡
+5. 派发后必须有 handoff
+6. 长期会话的 `sessionKey` 写入 `ai/state/agent-sessions.json`
+
+## 七、推荐推进顺序
+
+### 新建项目
+
+1. 首次启用引导
 2. 首轮接管检查
-3. 如果缺治理骨架，先 bootstrap governance
-4. 方案补齐与冻结
-5. 六部分工执行
-6. 测试、审批、终审
-7. 更新状态、交接、快照、归档
+3. 批准治理骨架初始化
+4. 进入方案阶段
+5. 方案审批
+6. 再进入执行
 
-## 五、什么时候不要直接批准 bootstrap
+### 中途接管项目
 
-下面这些情况先别批：
+1. 首次启用引导
+2. 首轮盘点
+3. 批准治理补齐
+4. 执行 recovery summary
+5. 决定恢复后优先动作
+6. 再进入方案或执行
 
-1. 当前目录其实是技能目录
-2. 当前目录其实是 OpenClaw workspace 根目录
-3. 目标项目路径还没明确
-4. 首轮接管结果还没出来
+完整提示词顺序见：
 
-## 六、与项目目录、workspace 目录的区别
+- [按推进顺序手册](./FLOWS.md)
 
-一定要区分：
+## 八、状态检查与修复
 
-### agent workspace
+技能已经内置：
 
-例如：
+- `scripts/validate_state.py`
+- `scripts/repair_state.py`
 
-- `/home/claw/clawd`
+适用情况：
 
-这是 agent 运行时的工作区。
+1. `orchestrator-state.json`、`START_HERE.md`、`project-handoff.md` 互相打架
+2. `active_tasks` 指向的 handoff 缺失
+3. legacy `orchestrator_state.json` 与新文件并存
+4. takeover 项目缺少 `project-takeover.md`
 
-### 真实业务项目目录
+对应文档见：
 
-例如：
+- [状态检查与修复](./STATE-TOOLS.md)
 
-- `/mnt/d/OpenClaw/Project/xianyu`
+## 九、门禁与终审
 
-这才是要被接管、要生成治理文件的目录。
+技能不会因为治理骨架存在就默认放行。
 
-两者可以相同，也可以不同。  
-如果不同，必须在提示词中显式指定目标项目目录。
+进入执行、测试、发布前，会分别依赖：
 
-## 七、建议组合阅读
+- 方案冻结
+- `architecture.md`
+- `task-tree.json`
+- 测试报告
+- 审批矩阵
+- 终审报告
+- 门禁报告
+- blocker 清零
+- 主链路回归通过
 
-如果你要长期使用，建议一起看：
+## 十、建议阅读顺序
 
-- [安装文档](./INSTALL.md)
-- [简易版文档](./SIMPLE.md)
-- [提示词文档](./PROMPTS.md)
-- [按推进顺序使用的提示词手册](./FLOWS.md)
+如果你第一次接触这个技能，推荐按这个顺序看：
 
-
-## ???????????
-
-???????? bootstrap??????????????????????????????
-
-?????
-
-- [???????](./STATE-TOOLS.md)
-
-?????
-
-1. ?????????
-2. ???????????????
-3. ???????
-4. ???????????? heartbeat??????
+1. [安装说明](./INSTALL.md)
+2. [简易版文档](./SIMPLE.md)
+3. [使用说明](./USAGE.md)
+4. [提示词文档](./PROMPTS.md)
+5. [按推进顺序手册](./FLOWS.md)
+6. [状态检查与修复](./STATE-TOOLS.md)

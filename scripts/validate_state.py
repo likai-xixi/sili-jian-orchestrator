@@ -36,7 +36,7 @@ WORKFLOW_STEP_IDS = {
         "hubu-data-work",
         "gongbu-ui-work",
         "bingbu-test-pass",
-        "libu-docs-update",
+        "libu-documentation",
         "xingbu-release-check",
         "department-review",
         "duchayuan-final-audit",
