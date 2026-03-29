@@ -142,6 +142,9 @@ sili-jian-orchestrator/
 请看详细使用说明：
 
 - [使用说明](./docs/USAGE.md)
+- [简易版文档](./docs/SIMPLE.md)
+- [详细版文档](./docs/DETAILED.md)
+- [提示词文档](./docs/PROMPTS.md)
 
 ## 仓库用途
 
