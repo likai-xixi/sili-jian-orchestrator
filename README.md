@@ -59,6 +59,28 @@
 - `tests/`：技能自身脚本的回归测试
 - `docs/`：中文安装、使用、提示词与状态工具说明
 
+## 目标项目 push 后会不会自动守门
+
+会，但前提是目标项目已经通过本技能完成治理初始化。
+
+治理初始化时，技能现在会一并落地：
+
+- `ai/tools/validate_state.py`
+- `ai/tools/validate_gates.py`
+- `ai/tools/run_project_guard.py`
+- `.github/workflows/project-guard.yml`
+
+这样目标项目后续在 GitHub 上执行 `push / pull request` 时，就会自动检查：
+
+1. 状态文件是否一致
+2. active handoff 是否存在
+3. 当前阶段门禁是否通过
+
+也就是说：
+
+- 本仓库自己的 CI：守这个技能仓库本身
+- 目标项目里的 `project-guard.yml`：守被接管的业务项目
+
 ## 文档入口
 
 - [安装说明](./docs/INSTALL.md)

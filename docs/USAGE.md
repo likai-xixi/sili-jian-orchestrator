@@ -173,15 +173,38 @@
 
 - [状态检查与修复](./STATE-TOOLS.md)
 
-## 七、文档导航
+## 七、目标项目的 GitHub 自动守门
+
+现在通过本技能执行 `bootstrap governance` 后，目标项目会自动得到：
+
+- `ai/tools/common.py`
+- `ai/tools/validate_state.py`
+- `ai/tools/validate_gates.py`
+- `ai/tools/run_project_guard.py`
+- `.github/workflows/project-guard.yml`
+
+这意味着目标项目后续在 GitHub 上：
+
+1. `push`
+2. `pull request`
+
+都会自动运行治理守门：
+
+- 状态一致性检查
+- 阶段门禁检查
+
+如果治理状态明显漂移，CI 会直接失败，提醒先修治理再继续推进。
+
+## 八、文档导航
 
 - [安装说明](./INSTALL.md)
 - [简易版文档](./SIMPLE.md)
 - [详细版文档](./DETAILED.md)
 - [提示词文档](./PROMPTS.md)
 - [按推进顺序手册](./FLOWS.md)
+- [状态检查与修复](./STATE-TOOLS.md)
 
-## 八、本地与远端 CI
+## 九、本地与远端 CI
 
 ### 本地一键校验
 

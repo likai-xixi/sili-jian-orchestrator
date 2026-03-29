@@ -126,12 +126,14 @@
    - ai/state/
    - ai/reports/
    - ai/handoff/
+   - ai/tools/
    - ai/runs/
    - ai/prompts/
    - ai/logs/
    - tests/
    - workflows/
    - docs/
+   - .github/workflows/
 5. 完成后输出：
    - 本次创建的目录和文件清单
    - 当前状态机阶段
@@ -141,7 +143,22 @@
 6. 完成治理初始化后停止，不得直接开始实现
 ```
 
-## 七、进入方案阶段
+## 七、检查目标项目自动守门是否已落地
+
+```text
+使用 $sili-jian-orchestrator 检查当前项目的 GitHub 自动守门是否已落地。
+
+要求：
+1. 检查 ai/tools/common.py、validate_state.py、validate_gates.py、run_project_guard.py 是否存在
+2. 检查 .github/workflows/project-guard.yml 是否存在
+3. 判断当前项目后续 push / pull request 时是否会自动执行治理守门
+4. 输出：
+   - 自动守门是否已就绪
+   - 缺失的文件
+   - 如未就绪，应先执行什么 next_action
+```
+
+## 八、进入方案阶段
 
 ```text
 使用 $sili-jian-orchestrator 进入方案阶段。
@@ -158,7 +175,7 @@
 6. 在方案未通过审批前，不得进入实现阶段
 ```
 
-## 八、状态检查
+## 九、状态检查
 
 ```text
 使用 $sili-jian-orchestrator 检查当前项目的状态一致性，不要进入实现阶段。
@@ -175,7 +192,7 @@
    - 当前 next_action
 ```
 
-## 九、状态修复
+## 十、状态修复
 
 ```text
 使用 $sili-jian-orchestrator 修复当前项目的常见状态漂移，但不要进入实现阶段。
@@ -193,7 +210,7 @@
    - 当前 next_action
 ```
 
-## 十、目录识别纠偏
+## 十一、目录识别纠偏
 
 ```text
 先不要执行 bootstrap governance。

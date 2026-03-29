@@ -184,7 +184,38 @@
 - blocker 清零
 - 主链路回归通过
 
-## 十、建议阅读顺序
+## 十、目标项目的持续守门
+
+从这一版开始，技能不只会守自己的仓库，也会在目标项目治理初始化时落地项目级 CI。
+
+### 自动写入的内容
+
+当你在目标项目执行 `bootstrap governance` 时，会同时生成：
+
+- `ai/tools/common.py`
+- `ai/tools/validate_state.py`
+- `ai/tools/validate_gates.py`
+- `ai/tools/run_project_guard.py`
+- `.github/workflows/project-guard.yml`
+
+### 目标项目 push 之后会发生什么
+
+该项目后续只要：
+
+1. push
+2. pull request
+
+GitHub Actions 就会自动执行项目级守门。
+
+当前默认守的是：
+
+1. 状态一致性
+2. active handoff 完整性
+3. 当前阶段门禁
+
+它不会在项目仍处于 planning 阶段时强行要求通过最终发布门禁，因此对新接管项目也更友好。
+
+## 十一、建议阅读顺序
 
 如果你第一次接触这个技能，推荐按这个顺序看：
 
@@ -195,7 +226,7 @@
 5. [按推进顺序手册](./FLOWS.md)
 6. [状态检查与修复](./STATE-TOOLS.md)
 
-## 十一、CI 与回归校验
+## 十二、CI 与回归校验
 
 为了避免后续继续增强时把技能脚本改坏，仓库已经补了两层校验。
 

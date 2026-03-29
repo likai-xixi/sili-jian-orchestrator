@@ -48,6 +48,8 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
                 self.assertTrue((project_root / "tests" / layer).is_dir(), layer)
 
             self.assertTrue((project_root / "ai" / "handoff" / "orchestrator" / "active" / "TAKEOVER-ASSESSMENT.md").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "run_project_guard.py").exists())
+            self.assertTrue((project_root / ".github" / "workflows" / "project-guard.yml").exists())
 
     def test_build_dispatch_payload_creates_handoff_stub_and_delete_cleanup(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -253,6 +255,76 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertTrue((project_root / "ai" / "handoff" / "neige" / "active" / "PLAN-001.md").exists())
             takeover_text = (state_dir / "project-takeover.md").read_text(encoding="utf-8")
             self.assertIn("Proceed in `mid-stream-takeover` mode.", takeover_text)
+
+    def test_project_guard_runner_passes_on_consistent_bootstrapped_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            (project_root / ".git").mkdir(parents=True)
+
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--scenario",
+                    "mid-stream-takeover",
+                    "--project-name",
+                    "xianyu",
+                    "--project-id",
+                    "xianyu",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+
+            handoff_text = (state_dir / "project-handoff.md").read_text(encoding="utf-8")
+            if "- Status:" not in handoff_text:
+                handoff_text += "\n- Status: draft\n"
+            (state_dir / "project-handoff.md").write_text(handoff_text, encoding="utf-8")
+
+            gate_report = project_root / "ai" / "reports" / "gate-report.md"
+            gate_report.write_text(
+                """# Gate Report
+
+## Recommendation
+
+- PASS
+
+- mainline regression passed: YES
+- rollback point available: YES
+""",
+                encoding="utf-8",
+            )
+
+            test_report = project_root / "ai" / "reports" / "test-report.md"
+            test_report.write_text(
+                """# Test Report
+
+## Recommendation
+
+- PASS
+""",
+                encoding="utf-8",
+            )
+
+            runner = subprocess.run(
+                [sys.executable, str(project_root / "ai" / "tools" / "run_project_guard.py"), str(project_root)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(runner.returncode, 0, runner.stderr)
+            self.assertTrue((project_root / "ai" / "reports" / "state-validation.md").exists())
+            self.assertTrue((project_root / "ai" / "reports" / "gate-validation.md").exists())
 
 
 if __name__ == "__main__":
