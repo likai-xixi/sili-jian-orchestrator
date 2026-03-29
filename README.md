@@ -94,7 +94,7 @@
 如果你要继续增强这个技能，建议优先跑：
 
 ```bash
-python -m unittest discover -s tests -v
+python scripts/run_repo_ci.py
 ```
 
 再修改这些关键脚本：
@@ -104,3 +104,12 @@ python -m unittest discover -s tests -v
 - `scripts/validate_state.py`
 - `scripts/repair_state.py`
 - `scripts/ensure_openclaw_agents.py`
+
+GitHub 端也已经接入自动校验：
+
+- `.github/workflows/skill-ci.yml`
+
+只要向 `main` 推送或发起 Pull Request，就会自动执行：
+
+1. 关键脚本 `py_compile`
+2. `tests/` 下的回归测试

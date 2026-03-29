@@ -194,3 +194,36 @@
 4. [提示词文档](./PROMPTS.md)
 5. [按推进顺序手册](./FLOWS.md)
 6. [状态检查与修复](./STATE-TOOLS.md)
+
+## 十一、CI 与回归校验
+
+为了避免后续继续增强时把技能脚本改坏，仓库已经补了两层校验。
+
+### 1. 本地 CI
+
+```bash
+python scripts/run_repo_ci.py
+```
+
+会自动执行：
+
+1. `bootstrap_governance.py`
+2. `build_dispatch_payload.py`
+3. `validate_state.py`
+4. `repair_state.py`
+5. `tests/test_skill_scripts.py`
+
+的语法编译检查，以及 `tests/` 下的回归测试。
+
+### 2. GitHub Actions
+
+仓库已内置：
+
+- `.github/workflows/skill-ci.yml`
+
+默认在以下时机自动执行：
+
+1. push 到 `main`
+2. pull request
+
+这层可以帮助你在 GitHub 上持续验证技能没有回归。

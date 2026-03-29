@@ -180,3 +180,24 @@
 - [详细版文档](./DETAILED.md)
 - [提示词文档](./PROMPTS.md)
 - [按推进顺序手册](./FLOWS.md)
+
+## 八、本地与远端 CI
+
+### 本地一键校验
+
+```bash
+python scripts/run_repo_ci.py
+```
+
+它会自动执行：
+
+1. 关键脚本语法编译检查
+2. `tests/` 下的回归测试
+
+### GitHub Actions
+
+仓库已经提供：
+
+- `.github/workflows/skill-ci.yml`
+
+当你推送到 `main` 或发起 Pull Request 时，会自动跑同一套校验。

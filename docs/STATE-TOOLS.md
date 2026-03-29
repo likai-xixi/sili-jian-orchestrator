@@ -168,3 +168,22 @@ python scripts/repair_state.py <项目根目录> --format markdown --output ai/r
 一句话理解：
 
 **先检查，再修复；修复后再检查；确认一致后再继续推进。**
+
+## 七、把状态工具纳入 CI
+
+如果你修改了状态相关脚本，建议本地先跑：
+
+```bash
+python scripts/run_repo_ci.py
+```
+
+这会覆盖：
+
+1. `validate_state.py`
+2. `repair_state.py`
+3. `bootstrap_governance.py`
+4. `build_dispatch_payload.py`
+
+以及对应的回归测试。
+
+GitHub 端也已接入自动校验 workflow，因此推送后会再次验证。
