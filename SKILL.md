@@ -261,6 +261,7 @@ Use these scripts when you need deterministic behavior:
 - `scripts/generate_takeover_report.py`
 - `scripts/recovery_summary.py`
 - `scripts/validate_gates.py`
+- `scripts/validate_state.py`
 - `scripts/create_run_snapshot.py`
 - `scripts/build_dispatch_payload.py`
 - `scripts/update_agent_sessions.py`
