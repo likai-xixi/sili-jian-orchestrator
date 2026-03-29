@@ -152,6 +152,15 @@ def validate(project_root: Path) -> dict:
             }
         )
 
+    if orchestrator and current_workflow and current_workflow not in WORKFLOW_STEP_IDS:
+        findings.append(
+            {
+                "code": "unknown_current_workflow",
+                "severity": "error",
+                "message": f"Current workflow '{current_workflow}' is not recognized by this repository.",
+            }
+        )
+
     if orchestrator and start_here_text:
         workflow_state = normalize(str(orchestrator.get("current_workflow", "")))
         workflow_start_here = normalize(extract_markdown_value(start_here_text, "Workflow"))

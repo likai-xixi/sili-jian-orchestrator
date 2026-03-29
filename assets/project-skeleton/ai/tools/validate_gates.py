@@ -5,10 +5,12 @@ import json
 import re
 from pathlib import Path
 
-from common import PASS_CONCLUSIONS, extract_conclusion, read_json, read_text
+from common import PASS_CONCLUSIONS, extract_conclusion, extract_field_value, read_json, read_text
 
 
 REVIEW_ROLES = ["libu2", "hubu", "gongbu", "bingbu", "libu", "xingbu"]
+EMPTY_VALUES = {"", "none", "n/a", "na"}
+AFFIRMATIVE_VALUES = {"yes", "true", "pass", "passed", "0", "zero", "none"}
 
 
 def contains_blocker(text: str) -> bool:
@@ -24,10 +26,64 @@ def contains_blocker(text: str) -> bool:
     return False
 
 
+def section_has_items(text: str, heading: str) -> bool:
+    capture = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            capture = stripped[3:].strip().lower() == heading.strip().lower()
+            continue
+        if not capture or not stripped:
+            continue
+        if stripped.startswith("- "):
+            value = stripped[2:].strip()
+            if value and value.lower() not in {"none", "n/a", "na"}:
+                return True
+        elif stripped.lower() not in {"none", "n/a", "na"}:
+            return True
+    return False
+
+
+def field_has_items(text: str, field_name: str) -> bool:
+    value = extract_field_value(text, field_name).strip()
+    if not value:
+        return False
+    lowered = value.lower()
+    if "[fill here]" in lowered or " / " in value:
+        return False
+    return lowered not in EMPTY_VALUES
+
+
+def field_is_not_affirmative(text: str, field_name: str) -> bool:
+    value = extract_field_value(text, field_name).strip()
+    if not value:
+        return False
+    lowered = value.lower()
+    if "[fill here]" in lowered or " / " in value:
+        return False
+    return lowered not in AFFIRMATIVE_VALUES
+
+
 def has_unresolved_placeholders(text: str) -> bool:
-    lowered = text.lower()
-    markers = ["[fill here]", "[gray / full / hotfix / rollback]", "passed:", "failed:", "skipped:"]
-    return any(marker in lowered for marker in markers)
+    for line in text.splitlines():
+        stripped = line.strip()
+        lowered = stripped.lower()
+        if "[fill here]" in lowered or "[gray / full / hotfix / rollback]" in lowered:
+            return True
+        if not stripped.startswith("- "):
+            continue
+        value = stripped[2:].strip()
+        if not value:
+            continue
+        if ":" in value:
+            _, field_value = value.split(":", 1)
+            field_value = field_value.strip()
+            if not field_value or " / " in field_value:
+                return True
+            continue
+        if " / " in value:
+            return True
+    return False
 
 
 def has_department_matrix_coverage(text: str) -> bool:
@@ -120,7 +176,10 @@ def validate(project_root: Path) -> dict:
     state_dir = project_root / "ai" / "state"
     reports_dir = project_root / "ai" / "reports"
 
-    state = read_json(state_dir / "orchestrator-state.json")
+    state_path = state_dir / "orchestrator-state.json"
+    state = read_json(state_path)
+    state_present = state_path.exists()
+    state_readable = state_present and bool(state)
     current_status = str(state.get("current_status", "draft")).lower()
     current_phase = str(state.get("current_phase", "planning")).lower()
     release_allowed = state.get("release_allowed", False)
@@ -141,7 +200,12 @@ def validate(project_root: Path) -> dict:
     placeholder_sources = []
     for name in ["test-report.md", "department-approval-matrix.md", "acceptance-report.md", "change-summary.md", "gate-report.md"]:
         text = read_text(reports_dir / name)
-        if text and contains_blocker(text):
+        if text and (
+            contains_blocker(text)
+            or section_has_items(text, "Blockers")
+            or field_has_items(text, "blockers")
+            or field_is_not_affirmative(text, "blocker count zero")
+        ):
             blocker_sources.append(name)
         if text and has_unresolved_placeholders(text):
             placeholder_sources.append(name)
@@ -165,6 +229,8 @@ def validate(project_root: Path) -> dict:
     release_stage = release_allowed or current_status in {"final-audit", "accepted", "committed", "archived"}
 
     phase_gate_passed = (
+        state_readable
+        and
         handoff_ok
         and not blocker_sources
         and (
@@ -193,6 +259,8 @@ def validate(project_root: Path) -> dict:
 
     return {
         "project_root": str(project_root.resolve()),
+        "state_present": state_present,
+        "state_readable": state_readable,
         "handoff_present": handoff_ok,
         "test_report_present": test_ok,
         "approval_matrix_present": matrix_ok,

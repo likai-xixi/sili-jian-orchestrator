@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from common import ensure_handoff_stub, read_text, resolve_project_root
+from common import HANDOFF_DIRS, ensure_handoff_stub, read_text, resolve_project_root
 
 
 MULTILINE_FIELDS = {
@@ -16,6 +16,8 @@ MULTILINE_FIELDS = {
     "downstream_reviewers",
     "testing_requirement",
 }
+
+VALID_AGENT_IDS = set(HANDOFF_DIRS) | {"orchestrator"}
 
 
 def parse_task_card(path: Path) -> dict[str, str]:
@@ -81,6 +83,16 @@ def build_prompt(card: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def validate_agent_id(agent_id: str | None) -> str:
+    normalized = (agent_id or "").strip()
+    if not normalized:
+        raise SystemExit("Task card is missing target_agent_id/target_agent.")
+    if normalized not in VALID_AGENT_IDS:
+        allowed = ", ".join(sorted(VALID_AGENT_IDS))
+        raise SystemExit(f"Unsupported target agent '{normalized}'. Allowed agents: {allowed}")
+    return normalized
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build sessions_spawn or sessions_send payload from a task card.")
     parser.add_argument("task_card", help="Path to task-card markdown")
@@ -91,6 +103,7 @@ def main() -> None:
 
     task_card_path = Path(args.task_card).resolve()
     card = parse_task_card(task_card_path)
+    agent_id = validate_agent_id(card.get("target_agent_id") or card.get("target_agent"))
     project_root = Path(args.project_root).resolve() if args.project_root else resolve_project_root(task_card_path)
     handoff_path = card.get("handoff_path", "").strip()
     if handoff_path:
@@ -99,7 +112,6 @@ def main() -> None:
             card["handoff_path"] = str(ensured.relative_to(project_root)).replace("\\", "/")
         else:
             card["handoff_path"] = str(ensured)
-    agent_id = card.get("target_agent_id") or card.get("target_agent")
     prompt = build_prompt(card)
 
     if args.mode == "spawn":

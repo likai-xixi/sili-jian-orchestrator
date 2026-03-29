@@ -100,9 +100,15 @@ def resolve_project_root(start: Path) -> Path:
 
 
 def ensure_handoff_stub(project_root: Path, handoff_path: str, card: dict[str, str]) -> Path:
+    root = project_root.resolve()
     candidate = Path(handoff_path)
     if not candidate.is_absolute():
-        candidate = project_root / candidate
+        candidate = root / candidate
+    candidate = candidate.resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"handoff_path escapes project root: {handoff_path}") from exc
     candidate.parent.mkdir(parents=True, exist_ok=True)
     if candidate.exists():
         return candidate
@@ -284,16 +290,18 @@ def scenario_from_intent(intent: str, project_root: Path) -> str:
         return "new-project"
     if current_workflow == "takeover-project":
         return "mid-stream-takeover"
+    if current_workflow == "resume-orchestrator":
+        return "session-recovery"
     if takeover_file_ready(project_root):
         return "mid-stream-takeover"
     if has_existing_context and current_workflow != "feature-delivery":
         return "mid-stream-takeover"
     if current_workflow == "new-project" and current_status in {"draft", "planning", "department-approval", "plan-approved"}:
         return "new-project"
-    if current_workflow == "feature-delivery":
-        return "new-feature"
     if latest_run_dir(project_root) is not None:
         return "session-recovery"
+    if current_workflow == "feature-delivery":
+        return "new-feature"
     return "mid-stream-takeover"
 
 

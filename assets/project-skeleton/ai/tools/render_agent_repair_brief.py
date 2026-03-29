@@ -24,7 +24,6 @@ def build_findings(state_report: dict, gate_report: dict) -> list[str]:
 def build_copy_prompt(project_root: Path, findings: list[str]) -> str:
     findings_block = "\n".join(f"- {item}" for item in findings) if findings else "- none"
     return f"""使用 $sili-jian-orchestrator 处理当前项目的治理问题，不要直接开始新功能开发。
-
 目标项目根目录：
 {project_root.as_posix()}
 

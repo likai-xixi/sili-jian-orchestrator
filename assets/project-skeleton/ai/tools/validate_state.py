@@ -53,6 +53,7 @@ def render_markdown(report: dict) -> str:
     findings = report.get("findings", [])
     errors = [item for item in findings if item.get("severity") == "error"]
     warnings = [item for item in findings if item.get("severity") == "warning"]
+    notes = [item for item in findings if item.get("severity") not in {"error", "warning"}]
 
     lines = [
         "# State Validation Report",
@@ -63,19 +64,26 @@ def render_markdown(report: dict) -> str:
         f"- current_status: {report.get('current_status', '')}",
         f"- current_workflow: {report.get('current_workflow', '')}",
         f"- active_task_count: {report.get('active_task_count', 0)}",
-        "",
-        "## Errors",
+        f"- finding_count: {len(findings)}",
+        f"- error_count: {len(errors)}",
+        f"- warning_count: {len(warnings)}",
         "",
     ]
-    if errors:
-        lines.extend(f"- `{item['code']}`: {item['message']}" for item in errors)
-    else:
-        lines.append("- none")
-    lines.extend(["", "## Warnings", ""])
-    if warnings:
-        lines.extend(f"- `{item['code']}`: {item['message']}" for item in warnings)
-    else:
-        lines.append("- none")
+
+    def append_group(title: str, items: list[dict]) -> None:
+        lines.append(f"## {title}")
+        lines.append("")
+        if not items:
+            lines.append("- none")
+            lines.append("")
+            return
+        for item in items:
+            lines.append(f"- `{item['code']}`: {item['message']}")
+        lines.append("")
+
+    append_group("Errors", errors)
+    append_group("Warnings", warnings)
+    append_group("Notes", notes)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -113,6 +121,15 @@ def validate(project_root: Path) -> dict:
     current_status = normalize(str(orchestrator.get("current_status", ""))) if orchestrator else ""
     next_owner = normalize(str(orchestrator.get("next_owner", ""))) if orchestrator else ""
 
+    if orchestrator and current_workflow and current_workflow not in WORKFLOW_STEP_IDS:
+        findings.append(
+            {
+                "code": "unknown_current_workflow",
+                "severity": "error",
+                "message": f"Current workflow '{current_workflow}' is not recognized by this repository.",
+            }
+        )
+
     if orchestrator and start_here_text:
         if normalize(extract_field_value(start_here_text, "Workflow")) not in {"", current_workflow}:
             findings.append(
@@ -149,6 +166,14 @@ def validate(project_root: Path) -> dict:
                     "message": "project-handoff workflow does not match orchestrator-state workflow.",
                 }
             )
+        if normalize(extract_field_value(handoff_text, "Current phase")) not in {"", normalize(str(orchestrator.get("current_phase", "")))}:
+            findings.append(
+                {
+                    "code": "phase_mismatch_handoff",
+                    "severity": "error",
+                    "message": "project-handoff phase does not match orchestrator-state phase.",
+                }
+            )
         if normalize(extract_field_value(handoff_text, "Status")) not in {"", current_status}:
             findings.append(
                 {
@@ -173,7 +198,6 @@ def validate(project_root: Path) -> dict:
         role = normalize(str(task.get("role", "")))
         status = normalize(str(task.get("status", "")))
         handoff_ref = str(task.get("handoff_path", "")).strip()
-        workflow_step = normalize(str(task.get("workflow_step_id", "")))
         if not task_id:
             findings.append({"code": "active_task_missing_id", "severity": "error", "message": "An active task is missing task_id."})
             continue
@@ -218,6 +242,7 @@ def validate(project_root: Path) -> dict:
                     "message": f"Handoff status '{handoff_status}' does not match active task status '{status}' for '{task_id}'.",
                 }
             )
+        workflow_step = normalize(extract_field_value(handoff_text, "workflow_step_id") or str(task.get("workflow_step_id", "")))
         allowed_steps = WORKFLOW_STEP_IDS.get(current_workflow)
         if workflow_step and allowed_steps and workflow_step not in allowed_steps:
             findings.append(
