@@ -7,6 +7,44 @@ from pathlib import Path
 from common import read_json, read_text, text_has_placeholders
 
 
+WORKFLOW_STEP_IDS = {
+    "new-project": {
+        "identify-project",
+        "bootstrap-governance",
+        "create-run-snapshot",
+        "freeze-initial-plan",
+        "plan-audit",
+        "update-state-and-handoff",
+    },
+    "takeover-project": {
+        "identify-project",
+        "inspect-governance",
+        "backfill-governance",
+        "planning-repair",
+        "backfill-tests",
+        "update-state-and-handoff",
+    },
+    "resume-orchestrator": {
+        "load-recovery-entry",
+        "load-state-and-reports",
+        "summarize-recovery",
+        "resume-next-action",
+    },
+    "feature-delivery": {
+        "plan-approved-batch",
+        "libu2-implementation",
+        "hubu-data-work",
+        "gongbu-ui-work",
+        "bingbu-test-pass",
+        "libu-docs-update",
+        "xingbu-release-check",
+        "department-review",
+        "duchayuan-final-audit",
+        "state-and-summary-update",
+    },
+}
+
+
 def extract_markdown_value(markdown: str, label: str) -> str:
     prefix = f"- {label}:"
     for line in markdown.splitlines():
@@ -34,6 +72,9 @@ def validate(project_root: Path) -> dict:
     start_here_text = read_text(start_here_path)
     handoff_text = read_text(handoff_path)
     takeover_text = read_text(takeover_path)
+    current_workflow = normalize(str(orchestrator.get("current_workflow", ""))) if orchestrator else ""
+    current_status = normalize(str(orchestrator.get("current_status", ""))) if orchestrator else ""
+    next_owner = normalize(str(orchestrator.get("next_owner", ""))) if orchestrator else ""
 
     findings: list[dict[str, str]] = []
 
@@ -152,9 +193,11 @@ def validate(project_root: Path) -> dict:
                 }
             )
 
+    in_progress_roles: list[str] = []
     for task in orchestrator.get("active_tasks", []) if orchestrator else []:
         task_id = str(task.get("task_id", "")).strip()
         role = str(task.get("role", "")).strip()
+        task_status = normalize(str(task.get("status", "")))
         handoff_ref = str(task.get("handoff_path", "")).strip()
         if not task_id:
             findings.append(
@@ -189,7 +232,8 @@ def validate(project_root: Path) -> dict:
             )
             continue
 
-        handoff_task_id = extract_markdown_value(read_text(handoff_path), "task_id")
+        handoff_text = read_text(handoff_path)
+        handoff_task_id = extract_markdown_value(handoff_text, "task_id")
         if handoff_task_id and normalize(handoff_task_id) != normalize(task_id):
             findings.append(
                 {
@@ -200,7 +244,7 @@ def validate(project_root: Path) -> dict:
             )
 
         if role:
-            handoff_role = extract_markdown_value(read_text(handoff_path), "role")
+            handoff_role = extract_markdown_value(handoff_text, "role")
             if handoff_role and normalize(handoff_role) != normalize(role):
                 findings.append(
                     {
@@ -210,8 +254,31 @@ def validate(project_root: Path) -> dict:
                     }
                 )
 
-    workflow = normalize(str(orchestrator.get("current_workflow", ""))) if orchestrator else ""
-    if workflow == "takeover-project":
+        handoff_status = normalize(extract_markdown_value(handoff_text, "status"))
+        if task_status and handoff_status and handoff_status != task_status:
+            findings.append(
+                {
+                    "code": "active_task_handoff_status_mismatch",
+                    "severity": "warning",
+                    "message": f"Handoff status '{handoff_status}' does not match active task status '{task_status}' for '{task_id}'.",
+                }
+            )
+
+        workflow_step_id = normalize(extract_markdown_value(handoff_text, "workflow_step_id") or str(task.get("workflow_step_id", "")))
+        allowed_steps = WORKFLOW_STEP_IDS.get(current_workflow)
+        if workflow_step_id and allowed_steps and workflow_step_id not in allowed_steps:
+            findings.append(
+                {
+                    "code": "workflow_step_not_in_current_workflow",
+                    "severity": "warning",
+                    "message": f"Workflow step '{workflow_step_id}' does not belong to current workflow '{current_workflow}'.",
+                }
+            )
+
+        if task_status == "in-progress" and role:
+            in_progress_roles.append(normalize(role))
+
+    if current_workflow == "takeover-project":
         if not takeover_text:
             findings.append(
                 {
@@ -228,6 +295,47 @@ def validate(project_root: Path) -> dict:
                     "message": "project-takeover.md still contains placeholder content in takeover mode.",
                 }
             )
+
+    unique_in_progress_roles = sorted(set(role for role in in_progress_roles if role))
+    if next_owner and unique_in_progress_roles and next_owner not in unique_in_progress_roles:
+        findings.append(
+            {
+                "code": "next_owner_not_in_progress_role",
+                "severity": "warning",
+                "message": f"next_owner '{next_owner}' does not match the current in-progress role(s): {', '.join(unique_in_progress_roles)}.",
+            }
+        )
+
+    execution_allowed = bool(orchestrator.get("execution_allowed", False)) if orchestrator else False
+    testing_allowed = bool(orchestrator.get("testing_allowed", False)) if orchestrator else False
+    release_allowed = bool(orchestrator.get("release_allowed", False)) if orchestrator else False
+
+    if execution_allowed and current_status in {"draft", "planning", "department-approval"}:
+        findings.append(
+            {
+                "code": "execution_allowed_too_early",
+                "severity": "error",
+                "message": f"execution_allowed is true while current_status is still '{current_status}'.",
+            }
+        )
+
+    if testing_allowed and not execution_allowed:
+        findings.append(
+            {
+                "code": "testing_allowed_without_execution",
+                "severity": "warning",
+                "message": "testing_allowed is true while execution_allowed is false.",
+            }
+        )
+
+    if release_allowed and not testing_allowed:
+        findings.append(
+            {
+                "code": "release_allowed_without_testing",
+                "severity": "warning",
+                "message": "release_allowed is true while testing_allowed is false.",
+            }
+        )
 
     state_ok = not any(item["severity"] == "error" for item in findings)
     return {
