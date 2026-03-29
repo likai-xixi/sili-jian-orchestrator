@@ -203,17 +203,50 @@ def is_workspace_root(path: Path) -> bool:
     return False
 
 
+def project_has_existing_context(project_root: Path) -> bool:
+    docs_dir = project_root / "docs"
+    if docs_dir.exists():
+        doc_count = sum(1 for path in docs_dir.rglob("*.md") if path.is_file())
+        if doc_count >= 3:
+            return True
+    context_dir = project_root / "ai" / "context"
+    if context_dir.exists():
+        context_count = sum(1 for path in context_dir.rglob("*.md") if path.is_file())
+        if context_count >= 2:
+            return True
+    for marker in ["package.json", "pnpm-workspace.yaml", "turbo.json", "src"]:
+        if (project_root / marker).exists():
+            return True
+    return False
+
+
+def takeover_file_ready(project_root: Path) -> bool:
+    takeover_text = read_text(project_root / "ai" / "state" / "project-takeover.md")
+    if not takeover_text:
+        return False
+    return not text_has_placeholders(takeover_text) and "Proceed in `mid-stream-takeover` mode." in takeover_text
+
+
 def scenario_from_intent(intent: str, project_root: Path) -> str:
     normalized = intent.strip().lower()
     if normalized and normalized != "auto":
         return normalized.replace("_", "-")
     if detect_directory_mode(project_root) == "workspace_root_mode":
         return "workspace-root"
+
     state = read_json(project_root / "ai" / "state" / "orchestrator-state.json")
     current_status = str(state.get("current_status", "")).lower()
     current_workflow = str(state.get("current_workflow", "")).lower()
+    has_existing_context = project_has_existing_context(project_root)
+
     if not (project_root / "ai").exists() and not (project_root / "tests").exists() and not (project_root / "workflows").exists():
         return "new-project"
+    if current_workflow == "takeover-project":
+        return "mid-stream-takeover"
+    if takeover_file_ready(project_root):
+        return "mid-stream-takeover"
+    if has_existing_context and current_workflow != "feature-delivery":
+        return "mid-stream-takeover"
     if current_workflow == "new-project" and current_status in {"draft", "planning", "department-approval", "plan-approved"}:
         return "new-project"
     if current_workflow == "feature-delivery":
@@ -273,7 +306,7 @@ def inspect_project(project_root: Path, intent: str = "auto") -> dict[str, Any]:
     frozen_requirement_present = "Frozen requirement:" in task_intake_text and "[fill here after planning approval]" not in task_intake_text.lower()
     architecture_ready = bool(architecture_text) and not text_has_placeholders(architecture_text)
     task_tree_is_ready = task_tree_ready(state_dir / "task-tree.json")
-    core_state_exists = not missing_state_files[:5]
+    core_state_exists = not missing_state_files[:6]
     plan_review = extract_conclusion(read_text(reports_dir / "architecture-review.md"), "Conclusion")
     final_audit = extract_conclusion(acceptance_text, "Final Conclusion")
     test_recommendation = extract_conclusion(test_text, "Recommendation")
