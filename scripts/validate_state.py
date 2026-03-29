@@ -58,6 +58,44 @@ def normalize(value: str) -> str:
     return " ".join(value.strip().lower().replace("_", "-").split())
 
 
+def render_markdown(report: dict) -> str:
+    findings = report.get("findings", [])
+    errors = [item for item in findings if item.get("severity") == "error"]
+    warnings = [item for item in findings if item.get("severity") == "warning"]
+    notes = [item for item in findings if item.get("severity") not in {"error", "warning"}]
+
+    lines = [
+        "# State Validation Report",
+        "",
+        f"- project_root: {report.get('project_root', '')}",
+        f"- state_consistent: {'yes' if report.get('state_consistent') else 'no'}",
+        f"- current_phase: {report.get('current_phase', '')}",
+        f"- current_status: {report.get('current_status', '')}",
+        f"- current_workflow: {report.get('current_workflow', '')}",
+        f"- active_task_count: {report.get('active_task_count', 0)}",
+        f"- finding_count: {len(findings)}",
+        f"- error_count: {len(errors)}",
+        f"- warning_count: {len(warnings)}",
+        "",
+    ]
+
+    def append_group(title: str, items: list[dict]) -> None:
+        lines.append(f"## {title}")
+        lines.append("")
+        if not items:
+            lines.append("- none")
+            lines.append("")
+            return
+        for item in items:
+            lines.append(f"- `{item.get('code', 'unknown')}`: {item.get('message', '')}")
+        lines.append("")
+
+    append_group("Errors", errors)
+    append_group("Warnings", warnings)
+    append_group("Notes", notes)
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def validate(project_root: Path) -> dict:
     state_dir = project_root / "ai" / "state"
     handoff_root = project_root / "ai" / "handoff"
@@ -352,12 +390,17 @@ def validate(project_root: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validate state, handoff, and active-task consistency for a governed project.")
     parser.add_argument("project_root", help="Target project root")
+    parser.add_argument("--format", choices=["json", "markdown"], default="json", help="Output format")
     parser.add_argument("--output", help="Optional JSON output path")
     args = parser.parse_args()
 
-    payload = json.dumps(validate(Path(args.project_root).resolve()), indent=2, ensure_ascii=False)
+    report = validate(Path(args.project_root).resolve())
+    if args.format == "markdown":
+        payload = render_markdown(report)
+    else:
+        payload = json.dumps(report, indent=2, ensure_ascii=False)
     if args.output:
-        Path(args.output).write_text(payload + "\n", encoding="utf-8")
+        Path(args.output).write_text(payload if payload.endswith("\n") else payload + "\n", encoding="utf-8")
     else:
         print(payload)
 
