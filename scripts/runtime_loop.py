@@ -29,6 +29,16 @@ FAILURE_EXIT_STATUSES = {
     "paused-for-decision",
 }
 DECISION_REQUIRED_CODES = {"customer_decision_required", "approval_conflict", "approval_deadlock", "resource_input_required"}
+WINDOW_ALERT_STATUSES = {
+    "escalated",
+    "paused-for-decision",
+    "resource-input-required",
+    "state-validation-blocked",
+    "failed",
+    "environment-blocked",
+    "control-blocked",
+    "paused",
+}
 
 
 def render_runtime_loop_markdown(summary: dict) -> str:
@@ -59,6 +69,107 @@ def render_runtime_loop_markdown(summary: dict) -> str:
 
 {body}
 """
+
+
+def render_window_notifications_markdown(payload: dict) -> str:
+    notifications = payload.get("notifications", [])
+    lines = [
+        "# OpenClaw Window Notifications",
+        "",
+        f"- updated_at: {payload.get('updated_at', '')}",
+        f"- count: {len(notifications)}",
+        "",
+    ]
+    if not notifications:
+        lines.append("- none")
+        return "\n".join(lines) + "\n"
+    for index, item in enumerate(notifications, start=1):
+        options = item.get("options", [])
+        option_text = "\n".join(f"  {opt_index}. {text}" for opt_index, text in enumerate(options, start=1)) or "  1. Continue monitoring."
+        lines.extend(
+            [
+                f"## Notification {index}",
+                "",
+                f"- level: {item.get('level', 'warning')}",
+                f"- title: {item.get('title', '')}",
+                f"- reason: {item.get('reason', '')}",
+                f"- impact: {item.get('impact', '')}",
+                f"- decision_needed: {item.get('decision_needed', 'recommended')}",
+                "- options:",
+                option_text,
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def collect_window_notifications(summary: dict) -> list[dict]:
+    notifications: list[dict] = []
+    for cycle in summary.get("cycles", []):
+        escalation = cycle.get("escalation", {}) if isinstance(cycle.get("escalation"), dict) else {}
+        escalation_notice = escalation.get("window_notification")
+        if isinstance(escalation_notice, dict):
+            notifications.append(dict(escalation_notice))
+            continue
+        dispatch_status = str((cycle.get("dispatch") or {}).get("status") or "")
+        if dispatch_status in {"state-validation-blocked", "resource-input-required"}:
+            notifications.append(
+                {
+                    "level": "error",
+                    "title": "司礼监告警：流程被门禁阻断",
+                    "reason": str((cycle.get("dispatch") or {}).get("message") or dispatch_status),
+                    "impact": "当前工作流不会继续派单，直到门禁问题被修复。",
+                    "decision_needed": "yes",
+                    "options": [
+                        "修复阻断问题后重试当前轮次。",
+                        "暂停自动化并手动审查当前状态。",
+                        "回滚到最近稳定状态后重新派单。",
+                    ],
+                }
+            )
+    summary_status = str(summary.get("status") or "")
+    if summary_status in WINDOW_ALERT_STATUSES:
+        message = str(summary.get("message") or summary_status)
+        notifications.append(
+            {
+                "level": "error" if summary_status in {"failed", "escalated", "paused-for-decision"} else "warning",
+                "title": "司礼监告警：运行循环需要用户关注",
+                "reason": message,
+                "impact": "自动推进已暂停或进入风险状态。",
+                "decision_needed": "yes",
+                "options": [
+                    "检查告警报告并确认下一步。",
+                    "修复问题后继续自动推进。",
+                    "切换到人工模式并重新规划任务。",
+                ],
+            }
+        )
+    deduped: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in notifications:
+        key = (str(item.get("title") or ""), str(item.get("reason") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def persist_window_notifications(project_root: Path, summary: dict) -> None:
+    notifications = collect_window_notifications(summary)
+    summary["window_notifications"] = notifications
+    summary["window_notification_required"] = bool(notifications)
+    summary["latest_window_notification"] = notifications[-1] if notifications else None
+    reports_dir = project_root / "ai" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        reports_dir / "openclaw-window-notifications.json",
+        {"updated_at": utc_now(), "notifications": notifications},
+    )
+    write_text(
+        reports_dir / "openclaw-window-notifications.md",
+        render_window_notifications_markdown({"updated_at": utc_now(), "notifications": notifications}),
+    )
 
 
 def active_work_exists(project_root: Path) -> bool:
@@ -133,6 +244,7 @@ def run_loop(
             "environment": {"status": "skipped-control-check"},
             "message": "Autonomous runtime is not active. Switch to automation_mode=autonomous before entering the loop.",
         }
+        persist_window_notifications(project_root, summary)
         reports_dir = project_root / "ai" / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         write_json(reports_dir / "runtime-loop-summary.json", summary)
@@ -166,6 +278,7 @@ def run_loop(
             "cycles": [],
             "message": "Project dependency bootstrap failed. Fix environment-bootstrap blockers before entering the runtime loop.",
         }
+        persist_window_notifications(project_root, summary)
         reports_dir = project_root / "ai" / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         write_json(reports_dir / "runtime-loop-summary.json", summary)
@@ -201,6 +314,7 @@ def run_loop(
             "rollover_report": str((project_root / "ai" / "reports" / "orchestrator-rollover.md").resolve()),
             "message": rollover_payload.get("rollover_reason", "Context budget threshold reached."),
         }
+        persist_window_notifications(project_root, summary)
         reports_dir = project_root / "ai" / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         write_json(reports_dir / "runtime-loop-summary.json", summary)
@@ -238,6 +352,7 @@ def run_loop(
             "decision_freeze": freeze,
             "message": resource_gate.get("message", ""),
         }
+        persist_window_notifications(project_root, summary)
         reports_dir = project_root / "ai" / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         write_json(reports_dir / "runtime-loop-summary.json", summary)
@@ -471,6 +586,7 @@ def run_loop(
     if rollover_payload:
         summary["rollover_report"] = str((project_root / "ai" / "reports" / "orchestrator-rollover.md").resolve())
         summary["message"] = rollover_payload.get("rollover_reason", "Context budget threshold reached.")
+    persist_window_notifications(project_root, summary)
     reports_dir = project_root / "ai" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     write_json(reports_dir / "runtime-loop-summary.json", summary)

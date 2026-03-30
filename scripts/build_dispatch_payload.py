@@ -79,6 +79,9 @@ def build_prompt(card: dict[str, str]) -> str:
         render_field("resource_constraints", card.get("resource_constraints", "")),
         render_field("workflow_step_id", card.get("workflow_step_id", "")),
         render_field("task_round_id", card.get("task_round_id", "")),
+        render_field("skill_policy", card.get("skill_policy", "")),
+        render_field("required_skills", card.get("required_skills", "")),
+        render_field("completion_schema_version", card.get("completion_schema_version", "")),
         render_field("priority", card.get("priority", "")),
         "",
         "Completion requirements:",
@@ -86,7 +89,10 @@ def build_prompt(card: dict[str, str]) -> str:
         "2. Record blockers explicitly.",
         "3. State whether the work may move to the next stage.",
         "4. Provide a concise summary back to the orchestrator.",
-        "5. If the task context feels stale or contradictory, stop and request a rollover instead of improvising.",
+        "5. Include completion_schema_version and execution_trace.",
+        "6. execution_trace must include execution_mode, skills_used, and evidence_refs.",
+        "7. If skill_policy is required, record the actual skills used.",
+        "8. If the task context feels stale or contradictory, stop and request a rollover instead of improvising.",
     ]
     return "\n".join(lines)
 

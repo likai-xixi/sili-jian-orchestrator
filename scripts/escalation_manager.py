@@ -70,6 +70,15 @@ def collect_inbox_findings(project_root: Path, findings: list[dict[str, Any]]) -
             "ai/reports/inbox-watch-summary.json",
             "Inspect failed inbox payloads and repair completion formatting before continuing.",
         )
+    if inbox_summary.get("guarded_count"):
+        add_finding(
+            findings,
+            "completion_guarded",
+            "error",
+            f"completion payloads were guarded by protocol checks: {inbox_summary.get('guarded_count')}",
+            "ai/reports/inbox-watch-summary.json",
+            "Review guarded inbox payloads, fix protocol violations, and re-dispatch the blocked task.",
+        )
 
 
 def collect_evidence_findings(project_root: Path, findings: list[dict[str, Any]]) -> None:
@@ -283,6 +292,37 @@ def render_escalation_markdown(findings: list[dict[str, Any]], state: dict[str, 
 """
 
 
+def build_window_notification(findings: list[dict[str, Any]], state: dict[str, Any]) -> dict[str, Any] | None:
+    if not findings:
+        return None
+    has_error = any(item.get("severity") == "error" for item in findings)
+    top = findings[0]
+    top_message = str(top.get("message") or "Workflow escalation detected.")
+    level = "error" if has_error else "warning"
+    impact = (
+        "Autonomous dispatch is blocked until violations are addressed."
+        if has_error
+        else "Autonomous dispatch should pause for manual confirmation."
+    )
+    decision_needed = "yes" if has_error else "recommended"
+    options = [
+        "Repair the reported issue and rerun the current runtime cycle.",
+        "Pause automation and request a manual decision before continuing.",
+        "Replan the current workflow batch and redispatch tasks.",
+    ]
+    return {
+        "level": level,
+        "title": "司礼监告警：流程已触发门禁",
+        "reason": top_message,
+        "impact": impact,
+        "decision_needed": decision_needed,
+        "options": options,
+        "current_workflow": state.get("current_workflow", ""),
+        "current_status": state.get("current_status", ""),
+        "next_owner": state.get("next_owner", "orchestrator"),
+    }
+
+
 def generate_escalation(project_root: Path) -> dict:
     state = read_json(project_root / "ai" / "state" / "orchestrator-state.json")
     findings = gather_escalation_findings(project_root)
@@ -292,6 +332,7 @@ def generate_escalation(project_root: Path) -> dict:
         "error": sum(1 for item in findings if item["severity"] == "error"),
         "warning": sum(1 for item in findings if item["severity"] == "warning"),
     }
+    window_notification = build_window_notification(findings, state)
     payload = {
         "created_at": utc_now(),
         "status": "escalated" if findings else "clear",
@@ -301,6 +342,8 @@ def generate_escalation(project_root: Path) -> dict:
         "current_workflow": state.get("current_workflow", ""),
         "current_status": state.get("current_status", ""),
         "next_owner": state.get("next_owner", "orchestrator"),
+        "window_notification_required": bool(window_notification),
+        "window_notification": window_notification,
     }
     write_json(reports_dir / "escalation-report.json", payload)
     write_text(reports_dir / "escalation-report.md", render_escalation_markdown(findings, state))

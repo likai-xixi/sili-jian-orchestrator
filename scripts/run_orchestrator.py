@@ -41,12 +41,50 @@ ROLE_TESTING = {
 }
 
 
+DEFAULT_COMPLETION_SCHEMA_VERSION = "v1"
+VALID_SKILL_POLICIES = {"required", "optional", "forbidden"}
+ROLE_SKILL_POLICY = {
+    "orchestrator": "optional",
+    "neige": "required",
+    "duchayuan": "required",
+    "libu2": "required",
+    "hubu": "required",
+    "gongbu": "required",
+    "bingbu": "required",
+    "libu": "required",
+    "xingbu": "required",
+}
+ROLE_REQUIRED_SKILLS = {
+    "neige": ["neige-governance"],
+    "duchayuan": ["duchayuan-audit"],
+    "libu2": ["libu2-implementation"],
+    "hubu": ["hubu-data"],
+    "gongbu": ["gongbu-frontend"],
+    "bingbu": ["bingbu-testing"],
+    "libu": ["libu-docs"],
+    "xingbu": ["xingbu-release"],
+}
+
+
 DISPATCHED_ENVELOPE_STATUSES = {"queued", "sent"}
 ACTIVE_TASK_STATUSES = {"in-progress", "queued", "active", "waiting", "paused", "blocked", "rework", "redesign"}
 FORMAL_DEPARTMENT_REVIEW_GUARD_CODES = {
     "department_review_before_cross_reviews_complete",
     "missing_department_approval_matrix",
     "incomplete_department_review_sources",
+    "missing_skill_usage_trace",
+    "skill_policy_violation",
+    "forbidden_skill_used",
+    "invalid_completion_payload",
+}
+STATE_VALIDATION_GUARD_REASONS = {
+    "department_review_before_cross_reviews_complete": "Formal department-review evidence is incomplete.",
+    "missing_department_approval_matrix": "Formal department-review evidence is incomplete.",
+    "incomplete_department_review_sources": "Formal department-review evidence is incomplete.",
+    "missing_skill_usage_trace": "Skill usage trace evidence is missing for the latest completion.",
+    "skill_policy_violation": "Skill usage policy violations are blocking autonomous execution.",
+    "forbidden_skill_used": "A forbidden skill usage record was detected and blocked by policy.",
+    "invalid_completion_payload": "Completion payload validation failed and requires repair before continuing.",
 }
 
 
@@ -59,6 +97,47 @@ def next_task_id(step: WorkflowStep) -> str:
     return f"{step.id.upper().replace('-', '_')}-{stamp}"
 
 
+def normalize_skill_policy(value: str | None, default: str = "optional") -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in VALID_SKILL_POLICIES:
+        return normalized
+    fallback = str(default or "optional").strip().lower()
+    return fallback if fallback in VALID_SKILL_POLICIES else "optional"
+
+
+def role_skill_requirements(role: str) -> tuple[str, list[str]]:
+    normalized_role = str(role).strip().lower()
+    policy = normalize_skill_policy(ROLE_SKILL_POLICY.get(normalized_role), default="optional")
+    required_skills = [str(item).strip() for item in ROLE_REQUIRED_SKILLS.get(normalized_role, []) if str(item).strip()]
+    if policy == "required" and not required_skills:
+        required_skills = [f"{normalized_role}-workflow-skill"] if normalized_role else []
+    return policy, required_skills
+
+
+def parse_card_list(value: str | None) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw or raw.lower() == "none":
+        return []
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    items = [item.strip().strip("'\"") for item in raw.split(",")]
+    return [item for item in items if item]
+
+
+def guard_reason_from_findings(findings: list[dict]) -> str:
+    reasons: list[str] = []
+    for item in findings:
+        code = str(item.get("code") or "").strip()
+        mapped = STATE_VALIDATION_GUARD_REASONS.get(code, "State validation guard blocked autonomous execution.")
+        if mapped not in reasons:
+            reasons.append(mapped)
+    if not reasons:
+        return "State validation guard blocked autonomous execution."
+    if len(reasons) == 1:
+        return reasons[0]
+    return "Multiple state-validation guards are active: " + "; ".join(reasons)
+
+
 def task_card_text(
     project_root: Path,
     step: WorkflowStep,
@@ -67,6 +146,8 @@ def task_card_text(
     task_round_id: str | None = None,
 ) -> str:
     dispatch_mode = "send" if session_key else "spawn"
+    skill_policy, required_skills = role_skill_requirements(step.role)
+    required_skills_value = ", ".join(required_skills) if required_skills else "none"
     handoff_path = f"ai/handoff/{step.role}/active/{task_id}.md"
     goal = f"Execute workflow step `{step.id}` for governed delivery."
     required_reads = "\n".join(
@@ -122,6 +203,9 @@ def task_card_text(
   {resource_constraints}
 - workflow_step_id: {step.id}
 - task_round_id: {task_round_id or ''}
+- skill_policy: {skill_policy}
+- required_skills: {required_skills_value}
+- completion_schema_version: {DEFAULT_COMPLETION_SCHEMA_VERSION}
 - priority: P1
 """
 
@@ -173,7 +257,7 @@ def formal_department_review_guard(project_root: Path) -> dict[str, Any] | None:
     payload = {
         "created_at": utc_now(),
         "status": "blocked",
-        "reason": "Formal department-review evidence is incomplete.",
+        "reason": guard_reason_from_findings(findings),
         "findings": findings,
         "state_validation": report,
     }
@@ -181,7 +265,7 @@ def formal_department_review_guard(project_root: Path) -> dict[str, Any] | None:
     md_path = reports_dir / "department-review-source-guard.md"
     write_json(json_path, payload)
     lines = [
-        "# Department Review Source Guard",
+        "# State Validation Guard",
         "",
         f"- created_at: {payload['created_at']}",
         f"- status: {payload['status']}",
@@ -312,7 +396,7 @@ def run(project_root: Path, max_dispatch: int = 7, transport: str | None = None)
             card_path,
             task_card_text(project_root, step, task_id, session_key=session_key, task_round_id=task_round_id or None),
         )
-        _, payload = build_payload_from_card(card_path)
+        card, payload = build_payload_from_card(card_path)
         mode = "send" if session_key else "spawn"
         envelope = dispatch_payload(project_root, payload, mode, step.agent_id, task_card=card_path, transport=transport)
 
@@ -339,6 +423,9 @@ def run(project_root: Path, max_dispatch: int = 7, transport: str | None = None)
                 "handoff_path": handoff_relative,
                 "workflow_step_id": step.id,
                 "task_round_id": task_round_id or None,
+                "skill_policy": normalize_skill_policy(card.get("skill_policy"), default=ROLE_SKILL_POLICY.get(step.role, "optional")),
+                "required_skills": parse_card_list(card.get("required_skills")),
+                "completion_schema_version": str(card.get("completion_schema_version") or DEFAULT_COMPLETION_SCHEMA_VERSION),
             }
         )
         if step.id not in progress["dispatched_steps"]:

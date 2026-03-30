@@ -32,6 +32,10 @@ CONTROL_DEFAULTS = {
     "autonomous_auto_commit_enabled": True,
     "autonomous_auto_commit_push": False,
     "autonomous_stop_on_customer_decision": True,
+    "strict_agent_protocol": True,
+    "strict_skill_audit": True,
+    "skill_violation_fuse_threshold": 2,
+    "window_notification_on_escalation": True,
     "session_rotation_policy": {
         "default": {
             "max_completion_count": 4,

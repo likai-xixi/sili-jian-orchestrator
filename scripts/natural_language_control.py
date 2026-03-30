@@ -97,8 +97,17 @@ def execute_request(
         "autonomy_defaults": autonomy,
     }
 
+    def attach_latest_window_notice(target: dict[str, object]) -> None:
+        notice_path = project_root / "ai" / "reports" / "openclaw-window-notifications.json"
+        if not notice_path.exists():
+            return
+        data = json.loads(notice_path.read_text(encoding="utf-8"))
+        notifications = data.get("notifications", []) if isinstance(data.get("notifications"), list) else []
+        target["window_notification"] = notifications[-1] if notifications else None
+
     if intent == "status":
         payload["control"] = automation_control.current_status(project_root)
+        attach_latest_window_notice(payload)
         return payload
 
     if intent == "pause":
@@ -137,6 +146,9 @@ def execute_request(
         max_dispatch=resolved_dispatch,
         transport=transport,
     )
+    runtime_payload = payload.get("runtime_loop", {})
+    notifications = runtime_payload.get("window_notifications", []) if isinstance(runtime_payload, dict) else []
+    payload["window_notification"] = notifications[-1] if notifications else None
     return payload
 
 

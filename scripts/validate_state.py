@@ -81,6 +81,7 @@ FORMAL_DEPARTMENT_REVIEW_STEPS = {
     "update-state-and-run-summary",
 }
 FORMAL_DEPARTMENT_REVIEW_ROLES = ["libu2", "hubu", "gongbu", "bingbu", "libu", "xingbu", "duchayuan"]
+SKILL_USAGE_ERROR_CODES = {"missing_skill_usage_trace", "skill_policy_violation", "forbidden_skill_used", "invalid_completion_payload"}
 
 
 def extract_markdown_value(markdown: str, label: str) -> str:
@@ -499,6 +500,53 @@ def validate(project_root: Path) -> dict:
                         + ", ".join(missing_reviewers),
                     }
                 )
+
+    last_completion = orchestrator.get("last_completion", {}) if orchestrator else {}
+    active_task_ids = {
+        str(task.get("task_id") or "").strip()
+        for task in (orchestrator.get("active_tasks", []) if orchestrator else [])
+        if str(task.get("task_id") or "").strip()
+    }
+    relevant_task_ids = set(active_task_ids)
+    if isinstance(last_completion, dict):
+        last_completion_task_id = str(last_completion.get("task_id") or "").strip()
+        if last_completion_task_id:
+            relevant_task_ids.add(last_completion_task_id)
+
+    skill_usage_report = read_json(project_root / "ai" / "reports" / "agent-skill-usage.json")
+    skill_items = skill_usage_report.get("items", []) if isinstance(skill_usage_report.get("items"), list) else []
+    latest_by_task: dict[str, dict] = {}
+    for item in skill_items:
+        task_key = str(item.get("task_id") or "UNKNOWN").strip() + "::" + str(item.get("agent_id") or "unknown").strip()
+        latest_by_task[task_key] = item
+    skill_violations = [
+        item
+        for item in latest_by_task.values()
+        if not bool(item.get("compliant", True))
+        and str(item.get("task_id") or "").strip()
+        and str(item.get("task_id") or "").strip() in relevant_task_ids
+    ]
+    for item in skill_violations:
+        violation_code = str(item.get("violation_code") or "skill_policy_violation").strip() or "skill_policy_violation"
+        normalized_code = violation_code if violation_code in SKILL_USAGE_ERROR_CODES else "skill_policy_violation"
+        findings.append(
+            {
+                "code": normalized_code,
+                "severity": "error",
+                "message": f"Skill usage violation for task `{item.get('task_id') or 'UNKNOWN'}`: {item.get('violation_reason') or 'policy mismatch'}",
+            }
+        )
+
+    if isinstance(last_completion, dict):
+        schema_version = normalize(str(last_completion.get("completion_schema_version", "")))
+        if schema_version == "v1" and not bool(last_completion.get("skill_audit_recorded", False)):
+            findings.append(
+                {
+                    "code": "missing_skill_usage_trace",
+                    "severity": "error",
+                    "message": "The latest completion did not record skill usage audit evidence.",
+                }
+            )
 
     state_ok = not any(item["severity"] == "error" for item in findings)
     return {

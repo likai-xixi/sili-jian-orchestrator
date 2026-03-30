@@ -69,17 +69,43 @@ def extract_field(task_text: str, field_name: str) -> str:
     return ""
 
 
+def parse_required_skills(value: str) -> list[str]:
+    text = value.strip()
+    if not text or text.lower() == "none":
+        return []
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    return [item.strip().strip("'\\\"") for item in text.split(",") if item.strip()]
+
+
 dispatch_path = Path(sys.argv[1]).resolve()
 envelope = json.loads(dispatch_path.read_text(encoding="utf-8"))
 project_root = dispatch_path.parents[3]
 payload = envelope.get("payload", {})
 task_text = payload.get("task") or payload.get("message") or ""
+skill_policy = (extract_field(task_text, "skill_policy") or "optional").strip().lower()
+required_skills = parse_required_skills(extract_field(task_text, "required_skills"))
+if skill_policy == "required":
+    execution_mode = "skill"
+    skills_used = required_skills or ["simulated-required-skill"]
+elif skill_policy == "forbidden":
+    execution_mode = "direct"
+    skills_used = []
+else:
+    execution_mode = "direct"
+    skills_used = []
 completion = {
     "agent_id": envelope.get("agent_id"),
     "task_id": extract_field(task_text, "task_id") or envelope.get("dispatch_id"),
     "workflow_step_id": extract_field(task_text, "workflow_step_id"),
     "status": "completed",
     "summary": "Auto-completed by the transport helper.",
+    "completion_schema_version": extract_field(task_text, "completion_schema_version") or "v1",
+    "execution_trace": {
+        "execution_mode": execution_mode,
+        "skills_used": skills_used,
+        "evidence_refs": [f"dispatch:{envelope.get('dispatch_id')}"],
+    },
 }
 inbox_dir = project_root / "ai" / "runtime" / "inbox"
 inbox_dir.mkdir(parents=True, exist_ok=True)
@@ -665,6 +691,75 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             result = run_orchestrator.run(project_root, max_dispatch=1, transport="outbox")
 
             self.assertEqual(result["status"], "state-validation-blocked")
+            self.assertTrue((reports_dir / "department-review-source-guard.md").exists())
+
+    def test_run_orchestrator_blocks_with_skill_policy_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "next_owner": "orchestrator",
+                        "next_action": "Review latest completion.",
+                        "workflow_progress": {
+                            "completed_steps": ["intake-feature", "confirm-or-replan", "plan-approval"],
+                            "blocked_steps": [],
+                            "dispatched_steps": [],
+                        },
+                        "active_tasks": [],
+                        "last_completion": {
+                            "task_id": "SKILL-FAIL-1",
+                            "workflow_step_id": "libu2-implementation",
+                            "completion_schema_version": "v1",
+                            "skill_audit_recorded": True,
+                        },
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: executing\n- Workflow: feature-delivery\n- Next owner: orchestrator\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: executing\n- Current phase: executing\n- Current workflow: feature-delivery\n- Next owner: orchestrator\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "agent-skill-usage.json").write_text(
+                json.dumps(
+                    {
+                        "items": [
+                            {
+                                "task_id": "SKILL-FAIL-1",
+                                "agent_id": "libu2",
+                                "compliant": False,
+                                "violation_code": "skill_policy_violation",
+                                "violation_reason": "required skill was missing",
+                            }
+                        ]
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = run_orchestrator.run(project_root, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(result["status"], "state-validation-blocked")
+            self.assertIn("Skill usage policy violations", result["message"])
             self.assertTrue((reports_dir / "department-review-source-guard.md").exists())
 
     def test_run_orchestrator_preserves_invalid_state_after_local_step_failure(self):
@@ -1696,6 +1791,77 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(summary["cycle_count"], 2)
             self.assertTrue(summary["cycles"][-1]["idle_state"]["limit_reached"])
 
+    def test_runtime_loop_emits_window_notification_when_escalated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "automation_mode": "autonomous",
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            with mock.patch("runtime_loop.runtime_environment.ensure_runtime_environment"), mock.patch(
+                "runtime_loop.environment_bootstrap.ensure_environment", return_value={"status": "ok"}
+            ), mock.patch(
+                "runtime_loop.inbox_watcher.process_inbox",
+                return_value={"processed_count": 0, "guarded_count": 0, "failed_count": 0, "items": []},
+            ), mock.patch(
+                "runtime_loop.run_orchestrator.run",
+                return_value={
+                    "status": "idle",
+                    "dispatch_count": 0,
+                    "attempted_dispatch_count": 0,
+                    "local_completion_count": 0,
+                },
+            ), mock.patch(
+                "runtime_loop.deliver_outbox",
+                return_value={"sent_count": 0, "failed_count": 0, "pending_config_count": 0, "items": []},
+            ), mock.patch(
+                "runtime_loop.evidence_collector.collect_evidence", return_value={"status": "ok"}
+            ), mock.patch(
+                "runtime_loop.escalation_manager.generate_escalation",
+                return_value={
+                    "status": "escalated",
+                    "items": ["Skill policy violation detected."],
+                    "findings": [{"code": "skill_policy_violation", "severity": "error", "message": "Skill policy violation detected."}],
+                    "window_notification": {
+                        "level": "error",
+                        "title": "司礼监告警：流程已触发门禁",
+                        "reason": "Skill policy violation detected.",
+                        "impact": "Autonomous dispatch is blocked until violations are addressed.",
+                        "decision_needed": "yes",
+                        "options": ["Fix and retry."],
+                    },
+                },
+            ), mock.patch(
+                "runtime_loop.task_rounds.complete_round_if_ready", return_value=None
+            ), mock.patch(
+                "runtime_loop.context_rollover.context_rollover_required", return_value={"should_rollover": False}
+            ), mock.patch(
+                "runtime_loop.parent_session_recovery.build_parent_recovery", return_value={}
+            ), mock.patch(
+                "runtime_loop.parent_session_recovery.write_recovery_artifacts", return_value={}
+            ):
+                summary = runtime_loop.run_loop(project_root, max_cycles=1, max_dispatch=1, transport="outbox")
+
+            self.assertTrue(summary["window_notification_required"])
+            self.assertTrue(summary["window_notifications"])
+            self.assertIn("司礼监告警", summary["latest_window_notification"]["title"])
+            self.assertTrue((project_root / "ai" / "reports" / "openclaw-window-notifications.json").exists())
+
     def test_git_autocommit_only_commits_current_round_related_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -2355,6 +2521,64 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertEqual(state["active_tasks"][0]["status"], "closed")
             self.assertTrue((project_root / "ai" / "reports" / "agent-drift-guard-libu2.json").exists())
 
+    def test_inbox_watcher_records_single_violation_for_guarded_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            inbox_dir = project_root / "ai" / "runtime" / "inbox"
+            state_dir.mkdir(parents=True)
+            inbox_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "active_tasks": [
+                            {
+                                "task_id": "STRICT-1",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/libu2/active/STRICT-1.md",
+                                "workflow_step_id": "libu2-implementation",
+                                "skill_policy": "required",
+                                "required_skills": ["libu2-implementation"],
+                                "completion_schema_version": "v1",
+                            }
+                        ],
+                        "workflow_progress": {"completed_steps": ["plan-approval"], "blocked_steps": [], "dispatched_steps": ["libu2-implementation"]},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            (inbox_dir / "bad.json").write_text(
+                json.dumps(
+                    {
+                        "agent_id": "libu2",
+                        "task_id": "STRICT-1",
+                        "workflow_step_id": "libu2-implementation",
+                        "status": "completed",
+                        "summary": "invalid",
+                        "completion_schema_version": "v1",
+                        "execution_trace": {"execution_mode": "direct", "skills_used": [], "evidence_refs": ["e-1"]},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            summary = inbox_watcher.process_inbox(project_root)
+            self.assertEqual(summary["guarded_count"], 1)
+            audit = json.loads((project_root / "ai" / "reports" / "agent-skill-usage.json").read_text(encoding="utf-8"))
+            self.assertEqual(audit["totals"]["violations"], 1)
+            self.assertEqual(len(audit["items"]), 1)
+            self.assertEqual(audit["items"][-1]["violation_code"], "skill_policy_violation")
+
     def test_completion_consumer_marks_step_complete_and_updates_session(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -2412,6 +2636,117 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertIn("Review completion from libu2", result["next_action"])
             self.assertIn("next_owner=orchestrator", result["next_step_summary"])
             self.assertIn("Manual trigger needed", result["next_step_hint"])
+
+    def test_completion_consumer_rejects_required_skill_policy_without_skill_trace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2_IMPLEMENTATION-STRICT",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/libu2/active/LIBU2_IMPLEMENTATION-STRICT.md",
+                                "workflow_step_id": "libu2-implementation",
+                                "skill_policy": "required",
+                                "required_skills": ["libu2-implementation"],
+                                "completion_schema_version": "v1",
+                            }
+                        ],
+                        "workflow_progress": {"completed_steps": ["plan-approval"], "blocked_steps": [], "dispatched_steps": ["libu2-implementation"]},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "skill_policy=required"):
+                completion_consumer.consume_completion(
+                    project_root,
+                    {
+                        "agent_id": "libu2",
+                        "task_id": "LIBU2_IMPLEMENTATION-STRICT",
+                        "workflow_step_id": "libu2-implementation",
+                        "status": "completed",
+                        "summary": "Finished without skill trace.",
+                        "completion_schema_version": "v1",
+                        "execution_trace": {
+                            "execution_mode": "direct",
+                            "skills_used": [],
+                            "evidence_refs": ["proof-1"],
+                        },
+                    },
+                )
+
+            audit = json.loads((project_root / "ai" / "reports" / "agent-skill-usage.json").read_text(encoding="utf-8"))
+            self.assertGreaterEqual(audit["totals"]["violations"], 1)
+            self.assertEqual(audit["items"][-1]["violation_code"], "skill_policy_violation")
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(state["active_tasks"]), 1)
+
+    def test_completion_consumer_records_skill_usage_for_compliant_required_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2_IMPLEMENTATION-STRICT",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/libu2/active/LIBU2_IMPLEMENTATION-STRICT.md",
+                                "workflow_step_id": "libu2-implementation",
+                                "skill_policy": "required",
+                                "required_skills": ["libu2-implementation"],
+                                "completion_schema_version": "v1",
+                            }
+                        ],
+                        "workflow_progress": {"completed_steps": ["plan-approval"], "blocked_steps": [], "dispatched_steps": ["libu2-implementation"]},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            result = completion_consumer.consume_completion(
+                project_root,
+                {
+                    "agent_id": "libu2",
+                    "task_id": "LIBU2_IMPLEMENTATION-STRICT",
+                    "workflow_step_id": "libu2-implementation",
+                    "status": "completed",
+                    "summary": "Finished with required skill trace.",
+                    "completion_schema_version": "v1",
+                    "execution_trace": {
+                        "execution_mode": "skill",
+                        "skills_used": ["libu2-implementation"],
+                        "evidence_refs": ["proof-1"],
+                    },
+                },
+            )
+
+            self.assertEqual(result["status"], "completed")
+            audit = json.loads((project_root / "ai" / "reports" / "agent-skill-usage.json").read_text(encoding="utf-8"))
+            self.assertEqual(audit["totals"]["violations"], 0)
+            self.assertEqual(audit["totals"]["compliant"], 1)
+            self.assertEqual(audit["items"][-1]["skills_used"], ["libu2-implementation"])
 
     def test_completion_consumer_rejects_untracked_peer_completion(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -4114,6 +4449,148 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             report = validate_state.validate(project_root)
             codes = {item["code"] for item in report["findings"]}
             self.assertNotIn("workflow_step_not_in_current_workflow", codes)
+
+    def test_validate_state_blocks_on_skill_usage_violation_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "orchestrator",
+                        "next_action": "review completion",
+                        "execution_allowed": True,
+                        "testing_allowed": False,
+                        "release_allowed": False,
+                        "active_tasks": [],
+                        "last_completion": {
+                            "task_id": "LIBU2-1",
+                            "workflow_step_id": "libu2-implementation",
+                            "completion_schema_version": "v1",
+                            "skill_audit_recorded": True,
+                        },
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: executing\n- Workflow: feature-delivery\n- Next owner: orchestrator\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: executing\n- Current phase: executing\n- Current workflow: feature-delivery\n- Next owner: orchestrator\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "agent-skill-usage.json").write_text(
+                json.dumps(
+                    {
+                        "updated_at": "2026-01-01T00:00:00+00:00",
+                        "schema_version": "v1",
+                        "items": [
+                            {
+                                "task_id": "LIBU2-1",
+                                "agent_id": "libu2",
+                                "compliant": False,
+                                "violation_code": "skill_policy_violation",
+                                "violation_reason": "skill_policy=required but execution_trace.skills_used is empty.",
+                            }
+                        ],
+                        "totals": {"total": 1, "compliant": 0, "violations": 1},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertIn("skill_policy_violation", codes)
+            self.assertFalse(report["state_consistent"])
+
+    def test_validate_state_ignores_historical_skill_violations_outside_active_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "orchestrator",
+                        "next_action": "continue",
+                        "execution_allowed": True,
+                        "testing_allowed": False,
+                        "release_allowed": False,
+                        "active_tasks": [],
+                        "last_completion": {
+                            "task_id": "NEW-OK-1",
+                            "workflow_step_id": "libu2-implementation",
+                            "completion_schema_version": "v1",
+                            "skill_audit_recorded": True,
+                        },
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: executing\n- Workflow: feature-delivery\n- Next owner: orchestrator\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: executing\n- Current phase: executing\n- Current workflow: feature-delivery\n- Next owner: orchestrator\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "agent-skill-usage.json").write_text(
+                json.dumps(
+                    {
+                        "items": [
+                            {
+                                "task_id": "OLD-FAIL-1",
+                                "agent_id": "libu2",
+                                "compliant": False,
+                                "violation_code": "skill_policy_violation",
+                                "violation_reason": "old violation",
+                            },
+                            {
+                                "task_id": "NEW-OK-1",
+                                "agent_id": "libu2",
+                                "compliant": True,
+                                "violation_code": "",
+                                "violation_reason": "",
+                            },
+                        ]
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertNotIn("skill_policy_violation", codes)
+            self.assertTrue(report["state_consistent"])
 
     def test_build_department_matrix_ignores_stale_handoff_files_outside_registry_selection(self):
         with tempfile.TemporaryDirectory() as tmp:
