@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from common import read_json, utc_now, write_json, write_text
+from common import read_json, require_valid_json, utc_now, write_json, write_text
 from host_interface_probe import probe_host_interfaces, sync_runtime_config_from_probe
 
 
@@ -37,7 +37,6 @@ def build_default_parent_attach_command(project_root: Path) -> str:
 
 def ensure_runtime_environment(project_root: Path) -> dict:
     config_path = runtime_config_path(project_root)
-    config = read_json(config_path)
     bridge_path = bridge_script_path(project_root)
     probe = probe_host_interfaces(project_root)
     config = sync_runtime_config_from_probe(project_root, probe)
@@ -118,7 +117,8 @@ def resolve_parent_attach_command(project_root: Path) -> tuple[str, str]:
     env_template = os.environ.get("OPENCLAW_PARENT_ATTACH_COMMAND", "").strip()
     if env_template:
         return env_template, "environment"
-    config = read_json(runtime_config_path(project_root))
+    path = runtime_config_path(project_root)
+    config = require_valid_json(path, "ai/runtime/runtime-config.json") if path.exists() else {}
     template = str(config.get("parent_attach_command") or "").strip()
     if template:
         return template, "project-config"

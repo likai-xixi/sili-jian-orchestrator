@@ -40,6 +40,7 @@ ROLE_TESTING = {
 
 
 DISPATCHED_ENVELOPE_STATUSES = {"queued", "sent"}
+ACTIVE_TASK_STATUSES = {"in-progress", "queued", "active", "waiting", "paused", "blocked", "rework", "redesign"}
 
 
 def slugify(text: str) -> str:
@@ -144,7 +145,18 @@ def build_payload_from_card(card_path: Path) -> tuple[dict, dict]:
     return card, payload
 
 
-def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None) -> dict:
+def active_task_count(state: dict) -> int:
+    return sum(1 for task in state.get("active_tasks", []) if str(task.get("status", "")).strip().lower() in ACTIVE_TASK_STATUSES)
+
+
+def pending_outbox_count(project_root: Path) -> int:
+    outbox_dir = project_root / "ai" / "runtime" / "outbox"
+    if not outbox_dir.exists():
+        return 0
+    return sum(1 for path in outbox_dir.glob("*.json") if path.is_file())
+
+
+def run(project_root: Path, max_dispatch: int = 7, transport: str | None = None) -> dict:
     control = ensure_control_state(project_root)
     if control.get("automation_mode") == "paused":
         return {
@@ -184,6 +196,24 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
     local_results: list[dict] = []
     rollover_blockers: list[dict] = []
     if not candidates:
+        waiting_tasks = active_task_count(state)
+        queued_dispatches = pending_outbox_count(project_root)
+        if waiting_tasks or queued_dispatches:
+            state["next_owner"] = "orchestrator"
+            if waiting_tasks and queued_dispatches:
+                state["next_action"] = "Await completion from active tasks and delivery of pending dispatch envelopes before dispatching the next step."
+            elif waiting_tasks:
+                state["next_action"] = "Await completion from active tasks before dispatching the next step."
+            else:
+                state["next_action"] = "Deliver pending dispatch envelopes before dispatching the next step."
+            write_json(state_path, state)
+            return {
+                "status": "waiting-on-active-work",
+                "message": "No ready workflow steps yet. Waiting for active work to finish before dispatching more.",
+                "active_task_count": waiting_tasks,
+                "pending_dispatch_count": queued_dispatches,
+                "workflow": workflow.name,
+            }
         rollover = create_rollover(project_root)
         return {
             "status": "idle",
@@ -198,7 +228,7 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
             local_result = execute_local_step(project_root, step, task_id)
             dispatches.append(local_result)
             local_results.append(local_result)
-            state = read_json(state_path)
+            state = require_valid_json(state_path, "ai/state/orchestrator-state.json")
             progress = ensure_workflow_progress(state)
             continue
 
@@ -287,7 +317,7 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
         state["next_owner"] = "orchestrator" if len(accepted_dispatches) > 1 else accepted_dispatches[0]["role"]
         state["next_action"] = "Await completion from dispatched workflow steps and consume them via completion_consumer.py."
     elif local_results:
-        state = read_json(state_path)
+        state = require_valid_json(state_path, "ai/state/orchestrator-state.json")
     elif rollover_blockers:
         blocked_roles = ", ".join(sorted({item["role"] for item in rollover_blockers}))
         state["next_owner"] = "orchestrator"
@@ -330,7 +360,7 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run one orchestrator dispatch cycle for the current workflow.")
     parser.add_argument("project_root", help="Target project root")
-    parser.add_argument("--max-dispatch", type=int, default=3, help="Maximum number of ready steps to dispatch in one cycle")
+    parser.add_argument("--max-dispatch", type=int, default=7, help="Maximum number of ready steps to dispatch in one cycle")
     parser.add_argument("--transport", choices=["outbox", "command"], help="Override the dispatch transport")
     args = parser.parse_args()
 

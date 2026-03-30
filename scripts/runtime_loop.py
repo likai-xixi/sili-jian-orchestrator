@@ -80,7 +80,7 @@ def decision_pause_details(escalation: dict) -> tuple[bool, str, str | None]:
 def run_loop(
     project_root: Path,
     max_cycles: int | None = 10,
-    max_dispatch: int | None = 3,
+    max_dispatch: int | None = None,
     transport: str = "outbox",
     max_deliveries: int | None = None,
     max_completions: int | None = None,
@@ -94,6 +94,16 @@ def run_loop(
     status = "idle"
     started_at = utc_now()
     control = automation_control.ensure_control_state(project_root)
+    if activate and control.get("automation_mode") != "autonomous":
+        automation_control.set_mode(
+            project_root,
+            "autonomous",
+            actor=actor,
+            reason=activation_reason or "Runtime loop activation requested.",
+        )
+        control = automation_control.ensure_control_state(project_root)
+
+    mode = str(control.get("automation_mode", "normal"))
     autonomy = automation_control.autonomy_settings(project_root, control)
     resolved_max_cycles = max_cycles if max_cycles is not None else autonomy["max_cycles"]
     resolved_max_dispatch = max_dispatch if max_dispatch is not None else autonomy["max_dispatch"]
@@ -104,47 +114,6 @@ def run_loop(
     stop_on_customer_decision = autonomy["stop_on_customer_decision"]
     recoverable_failure_streak = 0
     idle_streak = 0
-    runtime_environment.ensure_runtime_environment(project_root)
-    environment_summary = environment_bootstrap.ensure_environment(
-        project_root,
-        apply=True,
-        include_system_tools=False,
-    )
-    if environment_summary.get("status") == "dependency-failed":
-        summary = {
-            "started_at": started_at,
-            "finished_at": utc_now(),
-            "status": "environment-blocked",
-            "automation_mode": str(control.get("automation_mode", "normal")),
-            "cycle_count": 0,
-            "total_dispatch_count": 0,
-            "total_attempted_dispatch_count": 0,
-            "total_sent_count": 0,
-            "total_processed_count": 0,
-            "total_failed_count": 0,
-            "environment": environment_summary,
-            "evidence_statuses": [],
-            "escalation_statuses": [],
-            "cycles": [],
-            "message": "Project dependency bootstrap failed. Fix environment-bootstrap blockers before entering the runtime loop.",
-        }
-        reports_dir = project_root / "ai" / "reports"
-        reports_dir.mkdir(parents=True, exist_ok=True)
-        write_json(reports_dir / "runtime-loop-summary.json", summary)
-        write_text(reports_dir / "runtime-loop-summary.md", render_runtime_loop_markdown(summary))
-        parent_session_recovery.write_recovery_artifacts(
-            project_root, parent_session_recovery.build_parent_recovery(project_root)
-        )
-        return summary
-    if activate and control.get("automation_mode") != "autonomous":
-        control = automation_control.set_mode(
-            project_root,
-            "autonomous",
-            actor=actor,
-            reason=activation_reason or "Runtime loop activation requested.",
-        )
-
-    mode = str(control.get("automation_mode", "normal"))
     if mode != "autonomous":
         status = "paused" if mode == "paused" else "control-blocked"
         summary = {
@@ -161,8 +130,41 @@ def run_loop(
             "evidence_statuses": [],
             "escalation_statuses": [],
             "cycles": [],
-            "environment": environment_summary,
+            "environment": {"status": "skipped-control-check"},
             "message": "Autonomous runtime is not active. Switch to automation_mode=autonomous before entering the loop.",
+        }
+        reports_dir = project_root / "ai" / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        write_json(reports_dir / "runtime-loop-summary.json", summary)
+        write_text(reports_dir / "runtime-loop-summary.md", render_runtime_loop_markdown(summary))
+        parent_session_recovery.write_recovery_artifacts(
+            project_root, parent_session_recovery.build_parent_recovery(project_root)
+        )
+        return summary
+
+    runtime_environment.ensure_runtime_environment(project_root)
+    environment_summary = environment_bootstrap.ensure_environment(
+        project_root,
+        apply=True,
+        include_system_tools=False,
+    )
+    if environment_summary.get("status") == "dependency-failed":
+        summary = {
+            "started_at": started_at,
+            "finished_at": utc_now(),
+            "status": "environment-blocked",
+            "automation_mode": mode,
+            "cycle_count": 0,
+            "total_dispatch_count": 0,
+            "total_attempted_dispatch_count": 0,
+            "total_sent_count": 0,
+            "total_processed_count": 0,
+            "total_failed_count": 0,
+            "environment": environment_summary,
+            "evidence_statuses": [],
+            "escalation_statuses": [],
+            "cycles": [],
+            "message": "Project dependency bootstrap failed. Fix environment-bootstrap blockers before entering the runtime loop.",
         }
         reports_dir = project_root / "ai" / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)

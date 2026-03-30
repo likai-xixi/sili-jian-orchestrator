@@ -28,7 +28,7 @@ These values live in `ai/state/orchestrator-state.json`:
 Use the helper below inside a governed project:
 
 ```bash
-python ai/tools/configure_autonomy.py <project-root> --max-cycles 50 --max-dispatch 3 --failure-streak-limit 3 --idle-streak-limit 2 --agent-id libu2 --completion-limit 2 --dispatch-limit 3
+python ai/tools/configure_autonomy.py <project-root> --max-cycles 999 --max-dispatch 7 --failure-streak-limit 3 --idle-streak-limit 2 --agent-id libu2 --completion-limit 2 --dispatch-limit 3
 ```
 
 Examples:

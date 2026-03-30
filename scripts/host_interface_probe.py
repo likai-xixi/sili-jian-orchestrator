@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from common import read_json, utc_now, write_json, write_text
+from common import read_json, require_valid_json, utc_now, write_json, write_text
 
 
 COMMAND_ENV_VARS = {
@@ -143,7 +143,8 @@ def probe_host_interfaces(project_root: Path) -> dict[str, Any]:
 
 
 def sync_runtime_config_from_probe(project_root: Path, probe: dict[str, Any]) -> dict[str, Any]:
-    config = read_json(runtime_config_path(project_root))
+    path = runtime_config_path(project_root)
+    config = require_valid_json(path, "ai/runtime/runtime-config.json") if path.exists() else {}
     config.setdefault("tool_install_commands", {})
     config["openclaw_cli_path"] = probe.get("openclaw_cli_path", "")
     config["openclaw_cli_available"] = bool(probe.get("openclaw_cli_available"))
@@ -158,7 +159,7 @@ def sync_runtime_config_from_probe(project_root: Path, probe: dict[str, Any]) ->
             if key == "parent_attach_command":
                 config["parent_attach_command_auto_generated"] = False
 
-    write_json(runtime_config_path(project_root), config)
+    write_json(path, config)
     return config
 
 

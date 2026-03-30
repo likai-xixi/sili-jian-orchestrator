@@ -201,7 +201,7 @@ def create_project_from_intake(
     activate: bool = False,
     transport: str = "outbox",
     max_cycles: int = 1,
-    max_dispatch: int = 3,
+    max_dispatch: int = 7,
 ) -> dict:
     ensure_workspace_root(workspace_root)
     intake = load_intake(workspace_root)
@@ -286,7 +286,7 @@ def main() -> None:
     parser.add_argument("--actor", default="user", help="Who initiated the intake")
     parser.add_argument("--transport", choices=["outbox", "command"], default="outbox")
     parser.add_argument("--max-cycles", type=int, default=1)
-    parser.add_argument("--max-dispatch", type=int, default=3)
+    parser.add_argument("--max-dispatch", type=int, default=7)
     args = parser.parse_args()
 
     workspace_root = Path(args.project_root).resolve()

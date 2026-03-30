@@ -418,6 +418,51 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
                 ],
             )
 
+    def test_run_orchestrator_default_dispatch_limit_covers_all_cross_reviews(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "automation_mode": "normal",
+                        "workflow_progress": {
+                            "completed_steps": [
+                                "intake-feature",
+                                "confirm-or-replan",
+                                "plan-approval",
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                            ]
+                        },
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            payload = run_orchestrator.run(project_root, transport="outbox")
+
+            self.assertEqual(payload["status"], "dispatched")
+            self.assertEqual(payload["dispatch_count"], 7)
+            self.assertEqual(payload["attempted_dispatch_count"], 7)
+
     def test_run_orchestrator_writes_dispatch_plan_and_outbox(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -487,6 +532,128 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             state = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
             self.assertIn("identify-project", state["workflow_progress"]["completed_steps"])
             self.assertTrue((project_root / "ai" / "reports" / "project-inspection.json").exists())
+
+    def test_run_orchestrator_waits_for_active_work_instead_of_generating_rollover(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "automation_mode": "autonomous",
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "workflow_progress": {
+                            "completed_steps": ["intake-feature", "confirm-or-replan", "plan-approval"],
+                            "blocked_steps": [],
+                            "dispatched_steps": [
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                            ],
+                        },
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2-1",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/libu2/active/LIBU2-1.md",
+                                "workflow_step_id": "libu2-implementation",
+                            },
+                            {
+                                "task_id": "HUBU-1",
+                                "role": "hubu",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/hubu/active/HUBU-1.md",
+                                "workflow_step_id": "hubu-implementation",
+                            },
+                            {
+                                "task_id": "GONGBU-1",
+                                "role": "gongbu",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/gongbu/active/GONGBU-1.md",
+                                "workflow_step_id": "gongbu-implementation",
+                            },
+                        ],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            result = run_orchestrator.run(project_root, max_dispatch=7, transport="outbox")
+
+            self.assertEqual(result["status"], "waiting-on-active-work")
+            self.assertEqual(result["active_task_count"], 3)
+            self.assertFalse((project_root / "ai" / "reports" / "orchestrator-rollover.md").exists())
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertIn("Await completion from active tasks", state["next_action"])
+
+    def test_run_orchestrator_preserves_invalid_state_after_local_step_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            workflows_dir = project_root / "workflows"
+            state_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+
+            state_path = state_dir / "orchestrator-state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "automation_mode": "autonomous",
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "draft",
+                        "current_status": "draft",
+                        "next_owner": "orchestrator",
+                        "workflow_progress": {"completed_steps": [], "blocked_steps": [], "dispatched_steps": []},
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            def corrupt_local_step(project_root: Path, step: object, task_id: str) -> dict[str, str]:
+                state_path.write_text("{ broken", encoding="utf-8")
+                return {
+                    "task_id": task_id,
+                    "step_id": getattr(step, "id", ""),
+                    "role": getattr(step, "role", ""),
+                    "status": "completed-local",
+                }
+
+            with mock.patch.object(run_orchestrator, "is_local_orchestrator_step", return_value=True), mock.patch.object(
+                run_orchestrator,
+                "execute_local_step",
+                side_effect=corrupt_local_step,
+            ):
+                with self.assertRaisesRegex(ValueError, "orchestrator-state.json"):
+                    run_orchestrator.run(project_root, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(state_path.read_text(encoding="utf-8"), "{ broken")
+            backups = list(state_dir.glob("orchestrator-state.json.corrupt-*.bak"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), "{ broken")
 
     def test_run_orchestrator_executes_resume_recovery_steps_locally(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -672,6 +839,30 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertNotEqual(activated["status"], "control-blocked")
             state = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["automation_mode"], "autonomous")
+
+    def test_runtime_loop_skips_environment_bootstrap_when_not_autonomous(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"automation_mode": "normal"}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch("runtime_loop.runtime_environment.ensure_runtime_environment") as ensure_runtime, mock.patch(
+                "runtime_loop.environment_bootstrap.ensure_environment"
+            ) as ensure_environment, mock.patch(
+                "runtime_loop.parent_session_recovery.build_parent_recovery", return_value={}
+            ), mock.patch(
+                "runtime_loop.parent_session_recovery.write_recovery_artifacts", return_value={}
+            ):
+                blocked = runtime_loop.run_loop(project_root, max_cycles=1, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(blocked["status"], "control-blocked")
+            self.assertEqual(blocked["environment"]["status"], "skipped-control-check")
+            ensure_runtime.assert_not_called()
+            ensure_environment.assert_not_called()
 
     def test_runtime_loop_forces_rollover_when_context_budget_threshold_is_reached(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -945,6 +1136,19 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             state = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["autonomous_runtime_max_cycles"], 24)
             self.assertEqual(state["session_rotation_policy"]["agents"]["libu2"]["max_dispatch_count"], 3)
+
+    def test_autonomy_settings_default_max_dispatch_is_seven(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            (project_root / "ai" / "state").mkdir(parents=True)
+
+            state = automation_control.ensure_control_state(project_root)
+            payload = automation_control.autonomy_settings(project_root, state)
+
+            self.assertEqual(state["autonomous_runtime_max_cycles"], 999)
+            self.assertEqual(payload["max_cycles"], 999)
+            self.assertEqual(state["autonomous_max_dispatch"], 7)
+            self.assertEqual(payload["max_dispatch"], 7)
 
     def test_session_registry_honors_per_agent_rotation_policy(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1603,6 +1807,70 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(summary["results"]["release"]["status"], "FAIL")
             self.assertEqual(summary["results"]["rollback"]["status"], "PASS_WITH_WARNING")
             self.assertTrue((reports_dir / "provider-evidence-summary.json").exists())
+
+    def test_provider_evidence_treats_invalid_json_as_fail_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            reports_dir = project_root / "ai" / "reports"
+            reports_dir.mkdir(parents=True)
+            invalid_json = Path(tmp) / "ci-provider.json"
+            invalid_json.write_text("{ broken", encoding="utf-8")
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "SILIJIAN_CI_PROVIDER_JSON": str(invalid_json),
+                },
+                clear=False,
+            ):
+                summary = provider_evidence.collect_provider_evidence(project_root)
+
+            ci_result = summary["results"]["ci"]
+            self.assertEqual(ci_result["status"], "FAIL")
+            self.assertEqual(ci_result["raw_status"], "invalid-json")
+            self.assertEqual(ci_result["source"], "json-file")
+            self.assertIn("invalid", ci_result["summary"].lower())
+            self.assertTrue((reports_dir / "provider-evidence-summary.json").exists())
+
+    def test_provider_evidence_treats_unreadable_json_path_as_fail_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            reports_dir = project_root / "ai" / "reports"
+            reports_dir.mkdir(parents=True)
+            unreadable_path = Path(tmp) / "ci-provider-dir"
+            unreadable_path.mkdir()
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "SILIJIAN_CI_PROVIDER_JSON": str(unreadable_path),
+                },
+                clear=False,
+            ):
+                summary = provider_evidence.collect_provider_evidence(project_root)
+
+            ci_result = summary["results"]["ci"]
+            self.assertEqual(ci_result["status"], "FAIL")
+            self.assertEqual(ci_result["raw_status"], "read-error")
+            self.assertEqual(ci_result["source"], "json-file")
+            self.assertIn("could not be read", ci_result["summary"].lower())
+            self.assertTrue((reports_dir / "provider-evidence-summary.json").exists())
+
+    def test_provider_evidence_prefers_conclusion_over_completed_status(self):
+        payload = provider_evidence.normalize_payload(
+            "ci",
+            "github-actions",
+            {
+                "status": "completed",
+                "conclusion": "failure",
+                "workflowName": "Skill CI",
+                "displayTitle": "Regression run",
+            },
+            "gh-cli",
+        )
+
+        self.assertEqual(payload["raw_status"], "failure")
+        self.assertEqual(payload["status"], "FAIL")
 
     def test_evidence_collector_prefers_provider_results_over_local_commands(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2420,6 +2688,25 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertEqual(second["command_source"], "config-file")
             self.assertEqual(config["parent_attach_command"], "custom-parent --payload {payload_file}")
             self.assertFalse(config["parent_attach_command_auto_generated"])
+
+    def test_runtime_environment_preserves_invalid_runtime_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            runtime_dir = project_root / "ai" / "runtime"
+            tools_dir = project_root / "ai" / "tools"
+            runtime_dir.mkdir(parents=True)
+            tools_dir.mkdir(parents=True)
+            (tools_dir / "openclaw_runtime_bridge.py").write_text("print('bridge')\n", encoding="utf-8")
+            config_path = runtime_dir / "runtime-config.json"
+            config_path.write_text("{ invalid", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "runtime-config.json"):
+                runtime_environment.ensure_runtime_environment(project_root)
+
+            self.assertEqual(config_path.read_text(encoding="utf-8"), "{ invalid")
+            backups = list(runtime_dir.glob("runtime-config.json.corrupt-*.bak"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), "{ invalid")
 
     def test_host_interface_probe_reads_machine_visible_commands_into_runtime_config(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -25,8 +25,8 @@ CONTROL_DEFAULTS = {
     "paused_at": None,
     "paused_by": None,
     "resume_action": None,
-    "autonomous_runtime_max_cycles": 50,
-    "autonomous_max_dispatch": 3,
+    "autonomous_runtime_max_cycles": 999,
+    "autonomous_max_dispatch": 7,
     "autonomous_failure_streak_limit": 3,
     "autonomous_idle_streak_limit": 2,
     "autonomous_auto_commit_enabled": True,
@@ -99,8 +99,8 @@ def autonomy_settings(project_root: Path, state: dict[str, Any] | None = None) -
     default_rotation = rotation_policy.get("default") if isinstance(rotation_policy.get("default"), dict) else {}
     agent_rotation = rotation_policy.get("agents") if isinstance(rotation_policy.get("agents"), dict) else {}
     return {
-        "max_cycles": max(1, int(payload.get("autonomous_runtime_max_cycles", 50) or 50)),
-        "max_dispatch": max(1, int(payload.get("autonomous_max_dispatch", 3) or 3)),
+        "max_cycles": max(1, int(payload.get("autonomous_runtime_max_cycles", 999) or 999)),
+        "max_dispatch": max(1, int(payload.get("autonomous_max_dispatch", 7) or 7)),
         "failure_streak_limit": max(1, int(payload.get("autonomous_failure_streak_limit", 3) or 3)),
         "idle_streak_limit": max(1, int(payload.get("autonomous_idle_streak_limit", 2) or 2)),
         "auto_commit_enabled": bool(payload.get("autonomous_auto_commit_enabled", True)),

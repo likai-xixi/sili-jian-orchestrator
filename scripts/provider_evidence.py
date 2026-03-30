@@ -60,14 +60,20 @@ def github_workflow_env(kind: str) -> str:
     return f"{KIND_ENV_PREFIX[kind]}_GITHUB_WORKFLOW"
 
 
+def preferred_status_value(payload: dict[str, Any]) -> str:
+    # GitHub Actions commonly reports status=completed plus conclusion=failure/success.
+    for key in ("conclusion", "result", "status", "state"):
+        value = payload.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
 def normalize_payload(kind: str, provider: str, payload: dict[str, Any], source: str) -> dict[str, Any]:
-    raw_status = str(
-        payload.get("status")
-        or payload.get("conclusion")
-        or payload.get("result")
-        or payload.get("state")
-        or ""
-    )
+    raw_status = preferred_status_value(payload)
     return {
         "kind": kind,
         "provider": provider,
@@ -106,7 +112,42 @@ def read_provider_json(kind: str) -> dict[str, Any] | None:
             "workflow": "",
             "raw": {"path": str(path)},
         }
-    payload = load_json_payload(path)
+    try:
+        payload = load_json_payload(path)
+    except json.JSONDecodeError as exc:
+        return {
+            "kind": kind,
+            "provider": os.environ.get(provider_name(kind), "json"),
+            "source": "json-file",
+            "collected_at": utc_now(),
+            "status": "FAIL",
+            "raw_status": "invalid-json",
+            "summary": f"Configured provider JSON file is invalid: {path}",
+            "url": "",
+            "run_id": "",
+            "workflow": "",
+            "raw": {
+                "path": str(path),
+                "error": str(exc),
+            },
+        }
+    except (OSError, UnicodeDecodeError) as exc:
+        return {
+            "kind": kind,
+            "provider": os.environ.get(provider_name(kind), "json"),
+            "source": "json-file",
+            "collected_at": utc_now(),
+            "status": "FAIL",
+            "raw_status": "read-error",
+            "summary": f"Configured provider JSON file could not be read: {path}",
+            "url": "",
+            "run_id": "",
+            "workflow": "",
+            "raw": {
+                "path": str(path),
+                "error": str(exc),
+            },
+        }
     provider = str(payload.get("provider") or os.environ.get(provider_name(kind), "json"))
     return normalize_payload(kind, provider, payload, "json-file")
 
