@@ -19,11 +19,13 @@ import change_request_control  # noqa: E402
 import close_session  # noqa: E402
 import completion_consumer  # noqa: E402
 import configure_review_controls  # noqa: E402
+import configure_autonomy  # noqa: E402
 import context_rollover  # noqa: E402
 import environment_bootstrap  # noqa: E402
 import escalation_manager  # noqa: E402
 import evidence_collector  # noqa: E402
 import first_run_check  # noqa: E402
+import git_autocommit  # noqa: E402
 import host_interface_probe  # noqa: E402
 import inbox_watcher  # noqa: E402
 import natural_language_control  # noqa: E402
@@ -33,15 +35,18 @@ import orchestrator_local_steps  # noqa: E402
 import parent_session_recovery  # noqa: E402
 import project_intake  # noqa: E402
 import provider_evidence  # noqa: E402
+import resource_requirements  # noqa: E402
 import replan_change_request  # noqa: E402
 import render_agent_repair_brief  # noqa: E402
 import repo_command_detector  # noqa: E402
 import resume_customer_decision  # noqa: E402
 import run_orchestrator  # noqa: E402
 import runtime_environment  # noqa: E402
+import runtime_guardrails  # noqa: E402
 import runtime_loop  # noqa: E402
 import session_registry  # noqa: E402
 import sync_project_tools  # noqa: E402
+import task_rounds  # noqa: E402
 import validate_gates  # noqa: E402
 import validate_state  # noqa: E402
 import workflow_engine  # noqa: E402
@@ -172,13 +177,16 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertTrue((project_root / "ai" / "tools" / "build_dispatch_payload.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "recovery_summary.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "automation_control.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "configure_autonomy.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "change_request_control.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "close_session.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "git_autocommit.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "natural_language_control.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "replan_change_request.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "provider_evidence.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "host_interface_probe.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "runtime_environment.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "runtime_guardrails.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "environment_bootstrap.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "openclaw_runtime_bridge.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "repo_command_detector.py").exists())
@@ -189,6 +197,8 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertTrue((project_root / "ai" / "tools" / "orchestrator_local_steps.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "run_orchestrator.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "runtime_loop.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "task_rounds.py").exists())
+            self.assertTrue((project_root / "ai" / "tools" / "resource_requirements.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "project_intake.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "configure_review_controls.py").exists())
             self.assertTrue((project_root / "ai" / "tools" / "resume_customer_decision.py").exists())
@@ -196,6 +206,8 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertTrue((project_root / ".github" / "workflows" / "project-guard.yml").exists())
             self.assertTrue((project_root / ".github" / "workflows" / "project-repair-brief.yml").exists())
             self.assertTrue((project_root / "docs" / "requirement-communication-template.md").exists())
+            self.assertTrue((project_root / "docs" / "ANTI-DRIFT-RUNBOOK.md").exists())
+            self.assertTrue((project_root / "docs" / "RESOURCE-DEPENDENCY-POLICIES.md").exists())
             self.assertTrue((project_root / "ai" / "state" / "review-controls.json").exists())
             doc_index = (project_root / "ai" / "state" / "doc-index.md").read_text(encoding="utf-8")
             self.assertIn("docs/requirement-communication-template.md", doc_index)
@@ -661,6 +673,73 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             state = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["automation_mode"], "autonomous")
 
+    def test_runtime_loop_forces_rollover_when_context_budget_threshold_is_reached(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            docs_dir = project_root / "docs"
+            state_dir.mkdir(parents=True)
+            docs_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"current_workflow": "feature-delivery", "current_status": "executing", "active_tasks": []}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+            (state_dir / "START_HERE.md").write_text("# Start\n", encoding="utf-8")
+            (state_dir / "project-handoff.md").write_text("X" * 400, encoding="utf-8")
+            (docs_dir / "ANTI-DRIFT-RUNBOOK.md").write_text("# Runbook\n", encoding="utf-8")
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "SILIJIAN_CONTEXT_SOFT_LIMIT_TOKENS": "20",
+                    "SILIJIAN_CONTEXT_HARD_LIMIT_TOKENS": "40",
+                },
+                clear=False,
+            ):
+                summary = runtime_loop.run_loop(project_root, max_cycles=2, max_dispatch=1, transport="outbox", activate=True)
+
+            self.assertEqual(summary["status"], "context-rollover")
+            self.assertTrue((project_root / "ai" / "reports" / "orchestrator-rollover.md").exists())
+            self.assertGreater(summary["context_budget"]["total_estimated_tokens"], 20)
+
+    def test_task_rounds_complete_planning_round_and_increment_participants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "workflow_progress": {
+                            "completed_steps": ["intake-feature", "confirm-or-replan", "plan-approval"],
+                            "dispatched_steps": [],
+                            "blocked_steps": [],
+                        },
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            record = task_rounds.complete_round_if_ready(project_root)
+            self.assertEqual(record["round_id"], "planning-round")
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertIn("planning-round", state["task_rounds"]["completed_rounds"])
+            registry = json.loads((state_dir / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["neige"]["task_round_count"], 1)
+            self.assertEqual(registry["duchayuan"]["task_round_count"], 1)
+            self.assertTrue((reports_dir / "task-round-history.json").exists())
+
     def test_runtime_loop_cli_exits_non_zero_for_control_blocked_status(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -820,9 +899,526 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(task_tree["change_requests"][0]["status"], "replan-required")
             self.assertTrue(payload["replan_packet"])
             self.assertEqual(payload["replan_packet"]["request_id"], payload["request_id"])
+            self.assertGreaterEqual(len(payload["guided_options"]), 3)
             self.assertTrue((project_root / "ai" / "reports" / f"replan-{payload['request_id'].lower()}.md").exists())
             control = automation_control.current_status(project_root)
             self.assertEqual(control["automation_mode"], "paused")
+
+    def test_configure_autonomy_updates_defaults_and_agent_rotation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            payload = configure_autonomy.configure(
+                project_root,
+                max_cycles=24,
+                max_dispatch=2,
+                failure_streak_limit=4,
+                idle_streak_limit=5,
+                auto_commit=False,
+                agent_id="libu2",
+                completion_limit=2,
+                dispatch_limit=3,
+                task_round_limit=2,
+            )
+            self.assertEqual(payload["max_cycles"], 24)
+            self.assertEqual(payload["max_dispatch"], 2)
+            self.assertFalse(payload["auto_commit_enabled"])
+            self.assertEqual(payload["session_rotation_policy"]["agents"]["libu2"]["max_completion_count"], 2)
+            self.assertEqual(payload["session_rotation_policy"]["agents"]["libu2"]["max_task_round_count"], 2)
+            state = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["autonomous_runtime_max_cycles"], 24)
+            self.assertEqual(state["session_rotation_policy"]["agents"]["libu2"]["max_dispatch_count"], 3)
+
+    def test_session_registry_honors_per_agent_rotation_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "session_rotation_policy": {
+                            "default": {"max_completion_count": 4, "max_dispatch_count": 6},
+                            "agents": {"libu2": {"max_completion_count": 1, "max_dispatch_count": 2}},
+                        }
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps(
+                    {
+                        "libu2": {
+                            "agent_id": "libu2",
+                            "session_key": "session-libu2",
+                            "status": "active",
+                            "active_workflow": "feature-delivery",
+                            "completion_count": 1,
+                            "dispatch_count": 1,
+                        }
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            decision = session_registry.session_reuse_decision(project_root, "libu2", workflow_name="feature-delivery")
+            self.assertTrue(decision["should_retire"])
+            self.assertIn("completion_count 1 reached the reuse limit of 1", decision["reason"])
+
+    def test_session_registry_refuses_reuse_when_task_round_budget_is_exhausted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "session_rotation_policy": {
+                            "default": {"max_completion_count": 4, "max_dispatch_count": 6, "max_task_round_count": 1},
+                            "agents": {},
+                        }
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps(
+                    {
+                        "libu2": {
+                            "agent_id": "libu2",
+                            "session_key": "session-libu2",
+                            "status": "active",
+                            "active_workflow": "feature-delivery",
+                            "task_round_count": 1,
+                        }
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            decision = session_registry.session_reuse_decision(project_root, "libu2", workflow_name="feature-delivery")
+            self.assertTrue(decision["should_retire"])
+            self.assertIn("task_round_count 1 reached the reuse limit of 1", decision["reason"])
+
+    def test_runtime_loop_pauses_and_freezes_on_customer_decision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            state_path = project_root / "ai" / "state" / "orchestrator-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["current_workflow"] = "feature-delivery"
+            state["current_phase"] = "customer-decision"
+            state["current_status"] = "await-customer-decision"
+            state["execution_allowed"] = True
+            state["testing_allowed"] = True
+            state["release_allowed"] = True
+            state["active_tasks"] = [
+                {
+                    "task_id": "LIBU2-1",
+                    "role": "libu2",
+                    "status": "in-progress",
+                    "handoff_path": "ai/handoff/libu2/active/LIBU2-1.md",
+                    "workflow_step_id": "libu2-implementation",
+                }
+            ]
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            (project_root / "ai" / "reports" / "customer-decision-required.md").write_text("# Decision\n", encoding="utf-8")
+            (project_root / "ai" / "state" / "agent-sessions.json").write_text(
+                json.dumps({"libu2": {"agent_id": "libu2", "session_key": "abc", "status": "active"}}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            summary = runtime_loop.run_loop(project_root, max_cycles=1, max_dispatch=1, transport="outbox", activate=True)
+            self.assertEqual(summary["status"], "paused-for-decision")
+            frozen = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(frozen["automation_mode"], "paused")
+            self.assertFalse(frozen["execution_allowed"])
+            self.assertFalse(frozen["testing_allowed"])
+            self.assertFalse(frozen["release_allowed"])
+            self.assertEqual(frozen["active_tasks"][0]["status"], "paused")
+            sessions = json.loads((project_root / "ai" / "state" / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(sessions["libu2"]["status"], "paused")
+
+    def test_runtime_loop_pauses_when_blocking_resource_gap_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            resource_requirements.record_gap(
+                project_root,
+                resource_name="Stripe live key",
+                category="credential",
+                policy="block",
+                due_stage="immediate",
+                scope_level="module",
+                scope_label="payments",
+                notes="Cannot continue real payment development without the live key.",
+            )
+
+            summary = runtime_loop.run_loop(project_root, max_cycles=1, max_dispatch=1, transport="outbox", activate=True)
+            self.assertEqual(summary["status"], "paused-for-decision")
+            frozen = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(frozen["automation_mode"], "paused")
+            self.assertFalse(frozen["execution_allowed"])
+            report = (project_root / "ai" / "reports" / "resource-gap-report.md").read_text(encoding="utf-8")
+            self.assertIn("Stripe live key", report)
+
+    def test_resource_gap_round_trip_requires_retest_before_closing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+
+            recorded = resource_requirements.record_gap(
+                project_root,
+                resource_name="Realtime analytics API",
+                category="real-api",
+                policy="mock",
+                due_stage="release",
+                scope_level="module",
+                scope_label="analytics",
+                notes="Use stubbed ingestion until the provider contract is approved.",
+            )
+            gap_id = recorded["gap"]["gap_id"]
+            state = json.loads((project_root / "ai" / "state" / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["resource_gaps"][0]["status"], "deferred")
+
+            resolved = resource_requirements.resolve_gap(
+                project_root,
+                gap_id=gap_id,
+                resolution_summary="Customer supplied the production sandbox token.",
+                supplied_by="customer",
+            )
+            self.assertEqual(resolved["gap"]["status"], "retest-pending")
+
+            closed = resource_requirements.complete_retest(
+                project_root,
+                gap_id=gap_id,
+                outcome="pass",
+                summary_text="Realtime ingestion passed against the live provider.",
+            )
+            self.assertEqual(closed["gap"]["status"], "closed")
+            self.assertEqual(closed["gap"]["retest_status"], "passed")
+
+    def test_runtime_loop_auto_commits_after_completed_task_round(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            helper = Path(tmp) / "transport_helper.py"
+            write_transport_helper(helper)
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            state_path = project_root / "ai" / "state" / "orchestrator-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["current_workflow"] = "feature-delivery"
+            state["current_phase"] = "planning"
+            state["current_status"] = "planning"
+            state["workflow_progress"] = {
+                "completed_steps": ["intake-feature"],
+                "blocked_steps": [],
+                "dispatched_steps": [],
+            }
+            state["active_tasks"] = []
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(project_root), "init"], capture_output=True, text=True, check=False)
+            subprocess.run(["git", "-C", str(project_root), "config", "user.email", "codex@example.com"], capture_output=True, text=True, check=False)
+            subprocess.run(["git", "-C", str(project_root), "config", "user.name", "Codex"], capture_output=True, text=True, check=False)
+            subprocess.run(["git", "-C", str(project_root), "add", "-A"], capture_output=True, text=True, check=False)
+            subprocess.run(["git", "-C", str(project_root), "commit", "-m", "initial"], capture_output=True, text=True, check=False)
+
+            with mock.patch.dict(os.environ, {"OPENCLAW_SPAWN_COMMAND": f'"{sys.executable}" "{helper}" "{{dispatch_file}}"'}):
+                summary = runtime_loop.run_loop(project_root, max_cycles=3, max_dispatch=1, transport="outbox", activate=True)
+
+            self.assertGreaterEqual(summary["total_dispatch_count"], 1)
+            self.assertIn("planning-round", summary["completed_task_rounds"])
+            report = json.loads((project_root / "ai" / "reports" / "auto-commit.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["status"], "committed")
+            head = subprocess.run(
+                ["git", "-C", str(project_root), "log", "-1", "--pretty=%s"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertIn("checkpoint after planning-round", head.stdout.strip())
+
+    def test_runtime_loop_keeps_polling_while_active_work_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "automation_mode": "autonomous",
+                        "autonomous_idle_streak_limit": 5,
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2-1",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "workflow_step_id": "libu2-implementation",
+                            }
+                        ],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            with mock.patch("runtime_loop.runtime_environment.ensure_runtime_environment"), mock.patch(
+                "runtime_loop.environment_bootstrap.ensure_environment", return_value={"status": "ok"}
+            ), mock.patch(
+                "runtime_loop.inbox_watcher.process_inbox",
+                return_value={"processed_count": 0, "guarded_count": 0, "failed_count": 0, "items": []},
+            ), mock.patch(
+                "runtime_loop.run_orchestrator.run",
+                return_value={
+                    "status": "idle",
+                    "dispatch_count": 0,
+                    "attempted_dispatch_count": 0,
+                    "local_completion_count": 0,
+                },
+            ), mock.patch(
+                "runtime_loop.deliver_outbox",
+                return_value={"sent_count": 0, "failed_count": 0, "pending_config_count": 0, "items": []},
+            ), mock.patch(
+                "runtime_loop.evidence_collector.collect_evidence", return_value={"status": "ok"}
+            ), mock.patch(
+                "runtime_loop.escalation_manager.generate_escalation", return_value={"status": "clear", "findings": []}
+            ), mock.patch(
+                "runtime_loop.task_rounds.complete_round_if_ready", return_value=None
+            ), mock.patch(
+                "runtime_loop.context_rollover.context_rollover_required", return_value={"should_rollover": False}
+            ), mock.patch(
+                "runtime_loop.parent_session_recovery.build_parent_recovery", return_value={}
+            ), mock.patch(
+                "runtime_loop.parent_session_recovery.write_recovery_artifacts", return_value={}
+            ):
+                summary = runtime_loop.run_loop(project_root, max_cycles=3, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(summary["status"], "max-cycles-reached")
+            self.assertEqual(summary["cycle_count"], 3)
+
+    def test_runtime_loop_stops_when_idle_streak_limit_is_reached(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "automation_mode": "autonomous",
+                        "autonomous_idle_streak_limit": 2,
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2-1",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "workflow_step_id": "libu2-implementation",
+                            }
+                        ],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            with mock.patch("runtime_loop.runtime_environment.ensure_runtime_environment"), mock.patch(
+                "runtime_loop.environment_bootstrap.ensure_environment", return_value={"status": "ok"}
+            ), mock.patch(
+                "runtime_loop.inbox_watcher.process_inbox",
+                return_value={"processed_count": 0, "guarded_count": 0, "failed_count": 0, "items": []},
+            ), mock.patch(
+                "runtime_loop.run_orchestrator.run",
+                return_value={
+                    "status": "idle",
+                    "dispatch_count": 0,
+                    "attempted_dispatch_count": 0,
+                    "local_completion_count": 0,
+                },
+            ), mock.patch(
+                "runtime_loop.deliver_outbox",
+                return_value={"sent_count": 0, "failed_count": 0, "pending_config_count": 0, "items": []},
+            ), mock.patch(
+                "runtime_loop.evidence_collector.collect_evidence", return_value={"status": "ok"}
+            ), mock.patch(
+                "runtime_loop.escalation_manager.generate_escalation", return_value={"status": "clear", "findings": []}
+            ), mock.patch(
+                "runtime_loop.task_rounds.complete_round_if_ready", return_value=None
+            ), mock.patch(
+                "runtime_loop.context_rollover.context_rollover_required", return_value={"should_rollover": False}
+            ), mock.patch(
+                "runtime_loop.parent_session_recovery.build_parent_recovery", return_value={}
+            ), mock.patch(
+                "runtime_loop.parent_session_recovery.write_recovery_artifacts", return_value={}
+            ):
+                summary = runtime_loop.run_loop(project_root, max_cycles=5, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(summary["status"], "idle-streak-limit-reached")
+            self.assertEqual(summary["cycle_count"], 2)
+            self.assertTrue(summary["cycles"][-1]["idle_state"]["limit_reached"])
+
+    def test_git_autocommit_only_commits_current_round_related_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            src_dir = project_root / "src"
+            handoff_dir = project_root / "ai" / "handoff" / "libu2" / "active"
+            state_dir = project_root / "ai" / "state"
+            src_dir.mkdir(parents=True)
+            handoff_dir.mkdir(parents=True)
+            state_dir.mkdir(parents=True)
+
+            tracked_file = src_dir / "kept.py"
+            unrelated_file = project_root / "notes.txt"
+            staged_unrelated_file = src_dir / "unrelated_staged.py"
+            state_file = state_dir / "orchestrator-state.json"
+            tracked_file.write_text("print('old')\n", encoding="utf-8")
+            unrelated_file.write_text("draft v1\n", encoding="utf-8")
+            staged_unrelated_file.write_text("print('before')\n", encoding="utf-8")
+            state_file.write_text("{}\n", encoding="utf-8")
+
+            subprocess.run(["git", "-C", str(project_root), "init"], capture_output=True, text=True, check=False)
+            subprocess.run(["git", "-C", str(project_root), "config", "user.email", "codex@example.com"], capture_output=True, text=True, check=False)
+            subprocess.run(["git", "-C", str(project_root), "config", "user.name", "Codex"], capture_output=True, text=True, check=False)
+            subprocess.run(["git", "-C", str(project_root), "add", "-A"], capture_output=True, text=True, check=False)
+            subprocess.run(["git", "-C", str(project_root), "commit", "-m", "initial"], capture_output=True, text=True, check=False)
+
+            tracked_file.write_text("print('new')\n", encoding="utf-8")
+            unrelated_file.write_text("draft v2\n", encoding="utf-8")
+            staged_unrelated_file.write_text("print('after')\n", encoding="utf-8")
+            state_file.write_text(json.dumps({"updated": True}, indent=2) + "\n", encoding="utf-8")
+            (handoff_dir / "LIBU2-ROUND.md").write_text(
+                "# Role Handoff\n\n"
+                "- task_round_id: implementation-round\n"
+                "- files_touched: src/kept.py\n",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                ["git", "-C", str(project_root), "add", "--", "src/unrelated_staged.py"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            payload = git_autocommit.autocommit(project_root, cycle_index=1, scope_label="implementation-round")
+
+            self.assertEqual(payload["status"], "committed")
+            self.assertIn("notes.txt", payload["ignored_changes"])
+            self.assertNotIn("src/unrelated_staged.py", payload["changes"])
+            show = subprocess.run(
+                ["git", "-C", str(project_root), "show", "--name-only", "--pretty=format:", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            committed_paths = {line.strip() for line in show.stdout.splitlines() if line.strip()}
+            self.assertIn("src/kept.py", committed_paths)
+            self.assertIn("ai/state/orchestrator-state.json", committed_paths)
+            self.assertNotIn("notes.txt", committed_paths)
+            self.assertNotIn("src/unrelated_staged.py", committed_paths)
+            status = subprocess.run(
+                ["git", "-C", str(project_root), "status", "--porcelain", "--", "notes.txt", "src/unrelated_staged.py"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertIn("notes.txt", status.stdout)
+            self.assertIn("src/unrelated_staged.py", status.stdout)
 
     def test_openclaw_adapter_drains_outbox_and_archives_sent_envelopes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -882,6 +1478,17 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertIn("run_repo_ci.py", summary["commands"]["ci"])
             self.assertIn("release.py", summary["commands"]["release"])
             self.assertIn("rollback.py", summary["commands"]["rollback"])
+
+    def test_repo_command_detector_uses_existing_test_directory_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            test_dir = project_root / "test"
+            test_dir.mkdir(parents=True)
+            (project_root / "service.py").write_text("print('ok')\n", encoding="utf-8")
+
+            summary = repo_command_detector.command_summary(project_root)
+
+            self.assertIn("-s test -v", summary["commands"]["test"])
 
     def test_evidence_collector_writes_reports_for_python_project(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1245,6 +1852,102 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(state["active_tasks"], [])
             self.assertIn("libu2-implementation", state["workflow_progress"]["completed_steps"])
 
+    def test_inbox_watcher_fuses_session_after_consecutive_invalid_completions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            runtime_dir = project_root / "ai" / "runtime"
+            inbox_dir = project_root / "ai" / "runtime" / "inbox"
+            helper = Path(tmp) / "close_helper.py"
+            state_dir.mkdir(parents=True)
+            runtime_dir.mkdir(parents=True)
+            inbox_dir.mkdir(parents=True)
+            helper.write_text(
+                """import json
+import sys
+from pathlib import Path
+
+payload = Path(sys.argv[1]).resolve()
+data = json.loads(payload.read_text(encoding='utf-8'))
+payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encoding='utf-8')
+""",
+                encoding="utf-8",
+            )
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2-REAL",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "handoff_path": "ai/handoff/libu2/active/LIBU2-REAL.md",
+                                "workflow_step_id": "libu2-implementation",
+                            }
+                        ],
+                        "workflow_progress": {"completed_steps": ["plan-approval"], "blocked_steps": [], "dispatched_steps": ["libu2-implementation"]},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps(
+                    {
+                        "libu2": {
+                            "agent_id": "libu2",
+                            "session_key": "sess-drift",
+                            "status": "active",
+                            "active_workflow": "feature-delivery",
+                        }
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (runtime_dir / "runtime-config.json").write_text(
+                json.dumps(
+                    {
+                        "close_session_command": f'"{sys.executable}" "{helper}" "{{payload_file}}"',
+                        "host_interface_sources": {"close_session_command": "project-config"},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            invalid_payload = {
+                "agent_id": "libu2",
+                "task_id": "FAKE-1",
+                "workflow_step_id": "final-audit",
+                "status": "completed",
+            }
+
+            with mock.patch.dict(os.environ, {"SILIJIAN_INVALID_COMPLETION_FUSE_THRESHOLD": "2"}, clear=False):
+                (inbox_dir / "invalid-1.json").write_text(json.dumps(invalid_payload, indent=2) + "\n", encoding="utf-8")
+                first = inbox_watcher.process_inbox(project_root)
+                self.assertEqual(first["guarded_count"], 1)
+                self.assertEqual(first["failed_count"], 0)
+
+                (inbox_dir / "invalid-2.json").write_text(json.dumps(invalid_payload, indent=2) + "\n", encoding="utf-8")
+                second = inbox_watcher.process_inbox(project_root)
+
+            self.assertEqual(second["guarded_count"], 1)
+            registry = json.loads((state_dir / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["libu2"]["status"], "closed")
+            self.assertTrue(registry["libu2"]["rebuild_required"])
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["active_tasks"][0]["status"], "closed")
+            self.assertTrue((project_root / "ai" / "reports" / "agent-drift-guard-libu2.json").exists())
+
     def test_completion_consumer_marks_step_complete_and_updates_session(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -1291,7 +1994,10 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(state["active_tasks"], [])
             self.assertIn("libu2-implementation", state["workflow_progress"]["completed_steps"])
             registry = json.loads((state_dir / "agent-sessions.json").read_text(encoding="utf-8"))
-            self.assertEqual(registry["libu2"]["status"], "idle")
+            self.assertEqual(registry["libu2"]["status"], "waiting")
+            decision = session_registry.session_reuse_decision(project_root, "libu2", workflow_name="feature-delivery")
+            self.assertEqual(decision["session_key"], "session-libu2")
+            self.assertEqual(decision["status"], "send")
             self.assertTrue((project_root / "ai" / "handoff" / "libu2" / "active" / "LIBU2_IMPLEMENTATION-1.md").exists())
 
     def test_completion_consumer_rejects_untracked_peer_completion(self):
@@ -1693,6 +2399,28 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertIn("parent_attach_command", payload["auto_configured_fields"])
             self.assertTrue((project_root / "ai" / "reports" / "runtime-environment.json").exists())
 
+    def test_runtime_environment_prefers_host_config_over_auto_generated_parent_attach(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            (project_root / "ai" / "tools").mkdir(parents=True)
+            (project_root / "ai" / "tools" / "openclaw_runtime_bridge.py").write_text("print('bridge')\n", encoding="utf-8")
+            config_file = Path(tmp) / "openclaw-config.json"
+
+            with mock.patch.dict(os.environ, {"OPENCLAW_CONFIG_PATH": str(config_file)}, clear=False):
+                first = runtime_environment.ensure_runtime_environment(project_root)
+                config_file.write_text(
+                    json.dumps({"parent_attach_command": "custom-parent --payload {payload_file}"}, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                second = runtime_environment.ensure_runtime_environment(project_root)
+
+            config = json.loads((project_root / "ai" / "runtime" / "runtime-config.json").read_text(encoding="utf-8"))
+            self.assertIn("openclaw_runtime_bridge.py", first["effective_parent_attach_command"])
+            self.assertEqual(second["effective_parent_attach_command"], "custom-parent --payload {payload_file}")
+            self.assertEqual(second["command_source"], "config-file")
+            self.assertEqual(config["parent_attach_command"], "custom-parent --payload {payload_file}")
+            self.assertFalse(config["parent_attach_command_auto_generated"])
+
     def test_host_interface_probe_reads_machine_visible_commands_into_runtime_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -1730,6 +2458,35 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(config["spawn_command"], "spawn-from-config")
             self.assertEqual(config["send_command"], "send-from-config")
             self.assertTrue((project_root / "ai" / "reports" / "host-interface-probe.json").exists())
+
+    def test_render_project_handoff_uses_report_conclusions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir = project_root / "ai" / "state"
+            reports_dir.mkdir(parents=True)
+            state_dir.mkdir(parents=True)
+            (reports_dir / "architecture-review.md").write_text("# Architecture Review\n\n## Conclusion\n\n- PASS\n", encoding="utf-8")
+            (reports_dir / "acceptance-report.md").write_text(
+                "# Acceptance Report\n\n## Final Conclusion\n\n- PASS_WITH_WARNING\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "test-report.md").write_text("# Test Report\n\n## Recommendation\n\n- PASS\n", encoding="utf-8")
+
+            rendered = orchestrator_local_steps.render_project_handoff(
+                project_root,
+                {
+                    "current_status": "accepted",
+                    "current_phase": "final-audit",
+                    "current_workflow": "feature-delivery",
+                    "workflow_progress": {},
+                    "active_tasks": [],
+                },
+            )
+
+            self.assertIn("- Latest plan review conclusion: PASS", rendered)
+            self.assertIn("- Latest result audit conclusion: PASS_WITH_WARNING", rendered)
+            self.assertIn("- Latest test conclusion: PASS", rendered)
 
     def test_environment_bootstrap_installs_python_requirements(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1827,6 +2584,115 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
                 session_registry.reusable_session_key(project_root, "libu2", workflow_name="takeover-project"),
                 "sess-libu2",
             )
+
+    def test_session_registry_refuses_reuse_when_session_budget_is_exhausted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            (project_root / "ai" / "state").mkdir(parents=True)
+
+            session_registry.upsert_session(
+                project_root,
+                "libu2",
+                session_key="sess-libu2",
+                status="active",
+                active_workflow="feature-delivery",
+                completion_count=3,
+                dispatch_count=3,
+            )
+
+            with mock.patch.dict(os.environ, {"SILIJIAN_SESSION_COMPLETION_LIMIT": "3"}, clear=False):
+                decision = session_registry.session_reuse_decision(project_root, "libu2", workflow_name="feature-delivery")
+
+            self.assertIsNone(decision["session_key"])
+            self.assertTrue(decision["should_retire"])
+            self.assertIn("completion_count", decision["reason"])
+
+    def test_run_orchestrator_blocks_when_session_rollover_close_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            runtime_dir = project_root / "ai" / "runtime"
+            workflows_dir = project_root / "workflows"
+            state_dir.mkdir(parents=True)
+            runtime_dir.mkdir(parents=True)
+            workflows_dir.mkdir(parents=True)
+            helper = Path(tmp) / "close_fail.py"
+            helper.write_text("raise SystemExit(1)\n", encoding="utf-8")
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "executing",
+                        "current_status": "executing",
+                        "workflow_progress": {
+                            "completed_steps": ["intake-feature", "confirm-or-replan", "plan-approval"],
+                            "blocked_steps": [],
+                            "dispatched_steps": [],
+                        },
+                        "active_tasks": [],
+                        "session_rotation_policy": {
+                            "default": {
+                                "max_completion_count": 4,
+                                "max_dispatch_count": 1,
+                                "max_task_round_count": 3,
+                            },
+                            "agents": {},
+                        },
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps(
+                    {
+                        "libu2": {
+                            "agent_id": "libu2",
+                            "session_key": "sess-existing",
+                            "status": "active",
+                            "active_workflow": "feature-delivery",
+                            "dispatch_count": 1,
+                        }
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (runtime_dir / "runtime-config.json").write_text(
+                json.dumps(
+                    {
+                        "close_session_command": f'"{sys.executable}" "{helper}" "{{payload_file}}"',
+                        "host_interface_sources": {"close_session_command": "project-config"},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (workflows_dir / "feature-delivery.yaml").write_text(
+                (REPO_ROOT / "assets" / "project-skeleton" / "workflows" / "feature-delivery.yaml").read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
+
+            result = run_orchestrator.run(project_root, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(result["status"], "session-rollover-blocked")
+            self.assertEqual(result["dispatch_count"], 0)
+            self.assertEqual(result["dispatches"][0]["status"], "session-rollover-blocked")
+            self.assertEqual(len(list((project_root / "ai" / "runtime" / "outbox").glob("*.json"))), 0)
+            registry = json.loads((state_dir / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["libu2"]["status"], "active")
+            self.assertEqual(registry["libu2"]["session_key"], "sess-existing")
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertIn("Session rollover is blocked", state["next_action"])
 
     def test_environment_bootstrap_reports_missing_system_tool_installers(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2125,6 +2991,62 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["active_tasks"][0]["status"], "closed")
             self.assertTrue((reports_dir / "session-close-libu2.json").exists())
+
+    def test_close_session_does_not_retire_registry_when_native_close_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            runtime_dir = project_root / "ai" / "runtime"
+            state_dir.mkdir(parents=True)
+            runtime_dir.mkdir(parents=True)
+            helper = Path(tmp) / "close_fail.py"
+            helper.write_text("raise SystemExit(1)\n", encoding="utf-8")
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_status": "executing",
+                        "active_tasks": [
+                            {
+                                "task_id": "LIBU2-1",
+                                "role": "libu2",
+                                "status": "in-progress",
+                                "workflow_step_id": "libu2-implementation",
+                            }
+                        ],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"libu2": {"agent_id": "libu2", "session_key": "sess-close", "status": "active"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (runtime_dir / "runtime-config.json").write_text(
+                json.dumps(
+                    {
+                        "close_session_command": f'"{sys.executable}" "{helper}" "{{payload_file}}"',
+                        "host_interface_sources": {"close_session_command": "project-config"},
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = close_session.apply_close(project_root, "libu2", "Close for handoff consolidation.", force_native=True)
+
+            self.assertFalse(payload["retired"])
+            self.assertEqual(payload["native_close_status"], "close-failed")
+            registry = json.loads((state_dir / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["libu2"]["status"], "active")
+            self.assertEqual(registry["libu2"]["session_key"], "sess-close")
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["active_tasks"][0]["status"], "in-progress")
 
     def test_natural_language_control_routes_close_session_request(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -4107,8 +5029,68 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
 
             report = validate_gates.validate(project_root)
             self.assertTrue(report["phase_gate_passed"])
-            self.assertFalse(report["release_stage"])
+
+    def test_validate_gates_blocks_release_when_resource_retest_is_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "project-handoff.md").write_text("# Handoff\n", encoding="utf-8")
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "release",
+                        "current_status": "accepted",
+                        "release_allowed": True,
+                        "execution_allowed": True,
+                        "testing_allowed": True,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "test-report.md").write_text(
+                "# Test Report\n\n## Recommendation\n\n- PASS\n\n- blocker count zero: yes\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "department-approval-matrix.md").write_text(
+                "# Matrix\n\n## Recommendation\n\n- PASS\n\n## Reviewer libu2\n- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: none\n\n## Reviewer hubu\n- libu2: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: none\n\n## Reviewer gongbu\n- libu2: PASS\n- hubu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: none\n\n## Reviewer bingbu\n- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- libu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: none\n\n## Reviewer libu\n- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: none\n\n## Reviewer xingbu\n- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n- findings: none\n- responses: none\n- closure: none\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "acceptance-report.md").write_text(
+                "# Acceptance\n\n## Final Conclusion\n\n- PASS\n\n- blocker count zero: yes\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "change-summary.md").write_text("# Change Summary\n\n- ready: yes\n", encoding="utf-8")
+            (reports_dir / "gate-report.md").write_text(
+                "# Gate Report\n\n## Recommendation\n\n- PASS\n\n- mainline regression passed: YES\n- rollback point available: YES\n",
+                encoding="utf-8",
+            )
+            recorded = resource_requirements.record_gap(
+                project_root,
+                resource_name="Stripe live callbacks",
+                category="real-api",
+                policy="mock",
+                due_stage="release",
+                scope_level="module",
+                scope_label="payments",
+                notes="Callbacks are still mocked and require a live retest before release.",
+            )
+            resource_requirements.resolve_gap(
+                project_root,
+                gap_id=recorded["gap"]["gap_id"],
+                resolution_summary="Customer provided the callback secret.",
+                supplied_by="customer",
+            )
+
+            report = validate_gates.validate(project_root)
+            self.assertFalse(report["phase_gate_passed"])
             self.assertFalse(report["final_gate_passed"])
+            self.assertIn("resource-gap-report.md", report["blocker_sources"])
 
     def test_validate_gates_blocks_aggregated_matrix_blockers(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -4333,7 +5315,7 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             f"sys.path.insert(0, r'{str(SCRIPTS_DIR)}'); "
             "import run_repo_ci; "
             "targets={p.name for p in run_repo_ci.collect_py_targets()}; "
-            "required={'common.py','validate_gates.py','ensure_openclaw_agents.py','first_run_check.py','inspect_project.py','generate_takeover_report.py','recovery_summary.py','run_project_guard.py','render_agent_repair_brief.py','sync_project_tools.py','session_registry.py','workflow_engine.py','openclaw_adapter.py','openclaw_runtime_bridge.py','completion_consumer.py','context_rollover.py','run_orchestrator.py','inbox_watcher.py','runtime_loop.py','orchestrator_local_steps.py','repo_command_detector.py','provider_evidence.py','host_interface_probe.py','runtime_environment.py','environment_bootstrap.py','evidence_collector.py','escalation_manager.py','parent_session_recovery.py','automation_control.py','natural_language_control.py','change_request_control.py','replan_change_request.py','project_intake.py','configure_review_controls.py','resume_customer_decision.py'}; "
+            "required={'common.py','validate_gates.py','ensure_openclaw_agents.py','first_run_check.py','inspect_project.py','generate_takeover_report.py','recovery_summary.py','run_project_guard.py','render_agent_repair_brief.py','sync_project_tools.py','session_registry.py','workflow_engine.py','openclaw_adapter.py','openclaw_runtime_bridge.py','completion_consumer.py','context_rollover.py','run_orchestrator.py','inbox_watcher.py','runtime_loop.py','task_rounds.py','orchestrator_local_steps.py','repo_command_detector.py','provider_evidence.py','host_interface_probe.py','runtime_environment.py','runtime_guardrails.py','environment_bootstrap.py','evidence_collector.py','escalation_manager.py','parent_session_recovery.py','automation_control.py','configure_autonomy.py','git_autocommit.py','natural_language_control.py','change_request_control.py','replan_change_request.py','project_intake.py','configure_review_controls.py','resume_customer_decision.py'}; "
             "missing=sorted(required-targets); "
             "print('\\n'.join(missing)); "
             "raise SystemExit(1 if missing else 0)"

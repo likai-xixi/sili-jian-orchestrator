@@ -6,11 +6,14 @@ from pathlib import Path
 
 from automation_control import ensure_control_state
 from build_dispatch_payload import build_prompt
+from close_session import apply_close
 from common import read_json, require_valid_json, utc_now, write_json, write_text
 from context_rollover import create_rollover
 from openclaw_adapter import dispatch_payload
 from orchestrator_local_steps import execute_local_step, is_local_orchestrator_step
-from session_registry import ensure_registry_schema, reusable_session_key, upsert_session
+from resource_requirements import evaluate_runtime_constraints, task_card_resource_context
+from session_registry import ensure_registry_schema, session_reuse_decision, upsert_session
+from task_rounds import record_round_progress
 from workflow_engine import WorkflowStep, ensure_workflow_progress, load_workflow, ready_steps
 
 
@@ -48,12 +51,33 @@ def next_task_id(step: WorkflowStep) -> str:
     return f"{step.id.upper().replace('-', '_')}-{stamp}"
 
 
-def task_card_text(step: WorkflowStep, task_id: str, session_key: str | None = None) -> str:
+def task_card_text(
+    project_root: Path,
+    step: WorkflowStep,
+    task_id: str,
+    session_key: str | None = None,
+    task_round_id: str | None = None,
+) -> str:
     dispatch_mode = "send" if session_key else "spawn"
     handoff_path = f"ai/handoff/{step.role}/active/{task_id}.md"
     goal = f"Execute workflow step `{step.id}` for governed delivery."
+    required_reads = "\n".join(
+        [
+            "ai/state/START_HERE.md",
+            "ai/state/project-handoff.md",
+            "docs/ANTI-DRIFT-RUNBOOK.md",
+        ]
+    )
+    anti_drift_protocol = "\n".join(
+        [
+            "Stay inside allowed_paths and the current workflow_step_id.",
+            "Do not widen scope or skip plan, review, or gate stages.",
+            "If requirements, state, or handoff conflict, stop and report blockers instead of guessing.",
+        ]
+    )
     acceptance = "Produce the required outputs, update the handoff, and report blockers explicitly."
     expected = ", ".join(step.outputs) if step.outputs else "updated handoff and step completion summary"
+    resource_constraints = task_card_resource_context(project_root)
     return f"""# Task Card
 
 - task_id: {task_id}
@@ -66,6 +90,10 @@ def task_card_text(step: WorkflowStep, task_id: str, session_key: str | None = N
 - title: Workflow step {step.id}
 - goal:
   {goal}
+- required_reads:
+  {required_reads}
+- anti_drift_protocol:
+  {anti_drift_protocol}
 - allowed_paths: {ROLE_ALLOWED_PATHS.get(step.role, 'src,tests,docs,ai')}
 - forbidden_paths: .git,.env,node_modules,__pycache__
 - dependencies:
@@ -82,7 +110,10 @@ def task_card_text(step: WorkflowStep, task_id: str, session_key: str | None = N
   orchestrator
 - testing_requirement:
   {ROLE_TESTING.get(step.role, 'follow project testing guidelines')}
+- resource_constraints:
+  {resource_constraints}
 - workflow_step_id: {step.id}
+- task_round_id: {task_round_id or ''}
 - priority: P1
 """
 
@@ -132,8 +163,17 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
             "message": "Customer decision is required before autonomous execution can continue.",
             "report_path": str(report_path.resolve()) if report_path.exists() else "",
         }
+    resource_gate = evaluate_runtime_constraints(project_root, state)
+    if resource_gate.get("status") != "ok":
+        return {
+            "status": "resource-input-required",
+            "message": resource_gate.get("message", ""),
+            "report_path": resource_gate.get("report_path", ""),
+        }
     workflow = load_workflow(project_root)
     progress = ensure_workflow_progress(state)
+    round_state = record_round_progress(project_root, state)
+    task_round_id = str(round_state.get("current_round_id") or "")
     candidates = ready_steps(workflow, state)[:max_dispatch]
 
     runtime_prompts = project_root / "ai" / "prompts" / "dispatch"
@@ -142,6 +182,7 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
     dispatches: list[dict] = []
     accepted_dispatches: list[dict] = []
     local_results: list[dict] = []
+    rollover_blockers: list[dict] = []
     if not candidates:
         rollover = create_rollover(project_root)
         return {
@@ -161,9 +202,36 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
             progress = ensure_workflow_progress(state)
             continue
 
-        session_key = reusable_session_key(project_root, step.agent_id, workflow_name=workflow.name)
+        reuse = session_reuse_decision(project_root, step.agent_id, workflow_name=workflow.name)
+        if reuse.get("should_retire") and reuse.get("record", {}).get("session_key"):
+            close_payload = apply_close(
+                project_root,
+                step.agent_id,
+                f"Automatic session rollover before `{step.id}`: {reuse.get('reason', 'reuse budget exceeded')}.",
+                force_native=True,
+            )
+            if not close_payload.get("retired"):
+                dispatch_record = {
+                    "task_id": task_id,
+                    "step_id": step.id,
+                    "role": step.role,
+                    "card_path": None,
+                    "dispatch_id": "",
+                    "transport": "native-close",
+                    "status": "session-rollover-blocked",
+                    "reason": close_payload.get("native_close_blocked_reason")
+                    or f"Unable to safely retire the existing `{step.agent_id}` session.",
+                }
+                dispatches.append(dispatch_record)
+                rollover_blockers.append(dispatch_record)
+                continue
+            reuse = session_reuse_decision(project_root, step.agent_id, workflow_name=workflow.name)
+        session_key = str(reuse.get("session_key") or "") or None
         card_path = runtime_prompts / f"{slugify(task_id)}.md"
-        write_text(card_path, task_card_text(step, task_id, session_key=session_key))
+        write_text(
+            card_path,
+            task_card_text(project_root, step, task_id, session_key=session_key, task_round_id=task_round_id or None),
+        )
         _, payload = build_payload_from_card(card_path)
         mode = "send" if session_key else "spawn"
         envelope = dispatch_payload(project_root, payload, mode, step.agent_id, task_card=card_path, transport=transport)
@@ -190,10 +258,12 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
                 "status": "in-progress",
                 "handoff_path": handoff_relative,
                 "workflow_step_id": step.id,
+                "task_round_id": task_round_id or None,
             }
         )
         if step.id not in progress["dispatched_steps"]:
             progress["dispatched_steps"].append(step.id)
+        existing_record = ensure_registry_schema(project_root).get(step.agent_id, {})
         upsert_session(
             project_root,
             step.agent_id,
@@ -203,6 +273,13 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
             last_step_id=step.id,
             handoff_path=handoff_relative,
             active_workflow=state.get("current_workflow"),
+            dispatch_count=int(existing_record.get("dispatch_count") or 0) + 1,
+            consecutive_invalid_completions=0 if not session_key else int(existing_record.get("consecutive_invalid_completions") or 0),
+            drift_status="clear" if not session_key else str(existing_record.get("drift_status") or "clear"),
+            rebuild_required=False if not session_key else bool(existing_record.get("rebuild_required")),
+            rebuild_reason=None if not session_key else existing_record.get("rebuild_reason"),
+            last_rebuild_at=utc_now() if reuse.get("should_retire") else existing_record.get("last_rebuild_at"),
+            clear_fields=["last_invalid_completion_at", "last_invalid_completion_reason"] if not session_key else None,
         )
         accepted_dispatches.append(dispatch_record)
 
@@ -211,6 +288,12 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
         state["next_action"] = "Await completion from dispatched workflow steps and consume them via completion_consumer.py."
     elif local_results:
         state = read_json(state_path)
+    elif rollover_blockers:
+        blocked_roles = ", ".join(sorted({item["role"] for item in rollover_blockers}))
+        state["next_owner"] = "orchestrator"
+        state["next_action"] = (
+            f"Session rollover is blocked for {blocked_roles}. Resolve native close issues before dispatching replacement work."
+        )
     else:
         state["next_owner"] = "orchestrator"
         state["next_action"] = "Dispatch transport did not accept any workflow steps. Fix the transport and rerun run_orchestrator.py."
@@ -231,7 +314,11 @@ def run(project_root: Path, max_dispatch: int = 3, transport: str | None = None)
     )
 
     return {
-        "status": "dispatched" if accepted_dispatches else ("local-progress" if local_results else "pending-transport"),
+        "status": (
+            "dispatched"
+            if accepted_dispatches
+            else ("local-progress" if local_results else ("session-rollover-blocked" if rollover_blockers else "pending-transport"))
+        ),
         "workflow": workflow.name,
         "dispatch_count": len(accepted_dispatches),
         "attempted_dispatch_count": len(dispatches),

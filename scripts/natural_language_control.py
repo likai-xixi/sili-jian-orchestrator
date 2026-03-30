@@ -81,17 +81,20 @@ def execute_request(
     request: str,
     actor: str = "user",
     transport: str = "outbox",
-    max_cycles: int = 1,
-    max_dispatch: int = 3,
+    max_cycles: int | None = None,
+    max_dispatch: int | None = None,
 ) -> dict:
     cleaned_request = strip_control_prefix(request)
     intent = classify_request(cleaned_request)
     reason = request.strip() or "Natural language automation control request."
+    control_state = automation_control.ensure_control_state(project_root)
+    autonomy = automation_control.autonomy_settings(project_root, control_state)
     payload: dict[str, object] = {
         "request": request,
         "cleaned_request": cleaned_request,
         "intent": intent,
         "project_root": str(project_root.resolve()),
+        "autonomy_defaults": autonomy,
     }
 
     if intent == "status":
@@ -125,11 +128,13 @@ def execute_request(
         payload["control"] = automation_control.current_status(project_root)
         return payload
 
+    resolved_cycles = max_cycles if max_cycles is not None else autonomy["max_cycles"]
+    resolved_dispatch = max_dispatch if max_dispatch is not None else autonomy["max_dispatch"]
     payload["control"] = automation_control.set_mode(project_root, "autonomous", actor=actor, reason=reason)
     payload["runtime_loop"] = runtime_loop.run_loop(
         project_root,
-        max_cycles=max_cycles,
-        max_dispatch=max_dispatch,
+        max_cycles=resolved_cycles,
+        max_dispatch=resolved_dispatch,
         transport=transport,
     )
     return payload
@@ -141,8 +146,8 @@ def main() -> None:
     parser.add_argument("request", help='Natural-language request such as "司礼监：进入自动模式", "司礼监：关闭 libu2 当前会话", or "司礼监：把登录流程改成短信验证码双通道"')
     parser.add_argument("--actor", default="user", help="Who initiated the request")
     parser.add_argument("--transport", choices=["outbox", "command"], default="outbox", help="Transport mode when entering autonomous mode")
-    parser.add_argument("--max-cycles", type=int, default=1, help="Loop cycles to run immediately after entering autonomous mode")
-    parser.add_argument("--max-dispatch", type=int, default=3, help="Maximum ready steps to dispatch when entering autonomous mode")
+    parser.add_argument("--max-cycles", type=int, help="Loop cycles to run immediately after entering autonomous mode")
+    parser.add_argument("--max-dispatch", type=int, help="Maximum ready steps to dispatch when entering autonomous mode")
     args = parser.parse_args()
 
     payload = execute_request(

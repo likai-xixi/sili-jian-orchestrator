@@ -151,8 +151,12 @@ def sync_runtime_config_from_probe(project_root: Path, probe: dict[str, Any]) ->
 
     for key in COMMAND_ENV_VARS:
         selected = str(probe.get("selected_commands", {}).get(key) or "").strip()
-        if selected and not str(config.get(key) or "").strip():
+        current = str(config.get(key) or "").strip()
+        auto_generated = key == "parent_attach_command" and bool(config.get("parent_attach_command_auto_generated"))
+        if selected and (not current or auto_generated):
             config[key] = selected
+            if key == "parent_attach_command":
+                config["parent_attach_command_auto_generated"] = False
 
     write_json(runtime_config_path(project_root), config)
     return config

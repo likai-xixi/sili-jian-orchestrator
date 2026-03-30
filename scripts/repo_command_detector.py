@@ -54,8 +54,9 @@ def python_commands(project_root: Path) -> dict[str, str]:
         return commands
 
     test_roots = [project_root / "tests", project_root / "test"]
-    if any(path.exists() for path in test_roots):
-        commands["test"] = f'"{sys.executable}" -m unittest discover -s tests -v'
+    test_root = next((path for path in test_roots if path.exists()), None)
+    if test_root is not None:
+        commands["test"] = f'"{sys.executable}" -m unittest discover -s {test_root.name} -v'
 
     py_files = sorted(
         path

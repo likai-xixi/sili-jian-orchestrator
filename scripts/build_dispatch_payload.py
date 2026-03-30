@@ -9,12 +9,15 @@ from common import HANDOFF_DIRS, ensure_handoff_stub, read_text, resolve_project
 
 MULTILINE_FIELDS = {
     "goal",
+    "required_reads",
+    "anti_drift_protocol",
     "dependencies",
     "acceptance",
     "expected_output",
     "upstream_dependencies",
     "downstream_reviewers",
     "testing_requirement",
+    "resource_constraints",
 }
 
 VALID_AGENT_IDS = set(HANDOFF_DIRS) | {"orchestrator"}
@@ -61,6 +64,8 @@ def build_prompt(card: dict[str, str]) -> str:
         render_field("task_id", card.get("task_id", "")),
         render_field("title", card.get("title", "")),
         render_field("goal", card.get("goal", "")),
+        render_field("required_reads", card.get("required_reads", "")),
+        render_field("anti_drift_protocol", card.get("anti_drift_protocol", "")),
         render_field("allowed_paths", card.get("allowed_paths", "")),
         render_field("forbidden_paths", card.get("forbidden_paths", "")),
         render_field("dependencies", card.get("dependencies", "")),
@@ -71,7 +76,9 @@ def build_prompt(card: dict[str, str]) -> str:
         render_field("upstream_dependencies", card.get("upstream_dependencies", "")),
         render_field("downstream_reviewers", card.get("downstream_reviewers", "")),
         render_field("testing_requirement", card.get("testing_requirement", "")),
+        render_field("resource_constraints", card.get("resource_constraints", "")),
         render_field("workflow_step_id", card.get("workflow_step_id", "")),
+        render_field("task_round_id", card.get("task_round_id", "")),
         render_field("priority", card.get("priority", "")),
         "",
         "Completion requirements:",
@@ -79,6 +86,7 @@ def build_prompt(card: dict[str, str]) -> str:
         "2. Record blockers explicitly.",
         "3. State whether the work may move to the next stage.",
         "4. Provide a concise summary back to the orchestrator.",
+        "5. If the task context feels stale or contradictory, stop and request a rollover instead of improvising.",
     ]
     return "\n".join(lines)
 

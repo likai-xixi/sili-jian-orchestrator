@@ -65,6 +65,8 @@ openclaw skills info sili-jian-orchestrator
 使用 $sili-jian-orchestrator ...
 ```
 
+进入自动推进前，建议把 [ANTI-DRIFT-RUNBOOK.md](/C:/Users/11131/Desktop/auto%20agent/sili-jian-orchestrator/docs/ANTI-DRIFT-RUNBOOK.md) 当成固定运行规范，而不是可选阅读。
+
 ## 4. 第一次使用的推荐顺序
 
 ### 4.1 首次启用引导
@@ -198,7 +200,7 @@ openclaw skills info sili-jian-orchestrator
 ### 9.1 首次引导
 
 ```text
-使用 $sili-jian-orchestrator 对当前目录执行首次启用引导，不要直接开始开发。
+使用 $sili-jian-orchestrator 对当前目录执行首次启用引导，不要直接开始开发，并遵守 docs/ANTI-DRIFT-RUNBOOK.md。
 ```
 
 ### 9.2 接管项目

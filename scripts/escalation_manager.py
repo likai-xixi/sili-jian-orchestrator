@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from common import read_json, read_text, utc_now, write_json, write_text
+from resource_requirements import write_report as write_resource_gap_report
 from validate_gates import validate as validate_gates
 
 
@@ -131,6 +132,30 @@ def collect_gate_findings(project_root: Path, state: dict[str, Any], findings: l
         )
 
 
+def collect_resource_findings(project_root: Path, findings: list[dict[str, Any]]) -> None:
+    report = write_resource_gap_report(project_root)
+    for gap in report.get("blocking_gaps", []):
+        add_finding(
+            findings,
+            "resource_input_required",
+            "error",
+            f"missing required resource: {gap.get('resource_name')} ({gap.get('category')}, policy={gap.get('policy')})",
+            "ai/reports/resource-gap-report.md",
+            "Provide the missing dependency or change the policy before autonomous execution continues.",
+        )
+    if report.get("blocking_gaps"):
+        return
+    for gap in report.get("release_validation_pending", []):
+        add_finding(
+            findings,
+            "resource_input_required",
+            "error",
+            f"deferred real-resource validation still pending: {gap.get('resource_name')} ({gap.get('category')}, status={gap.get('status')})",
+            "ai/reports/resource-gap-report.md",
+            "Supply the real dependency, rerun the integration or acceptance path, then close the retest debt before continuing.",
+        )
+
+
 def collect_review_loop_findings(project_root: Path, state: dict[str, Any], findings: list[dict[str, Any]]) -> None:
     current_status = str(state.get("current_status", "")).strip().lower()
     if current_status == "cabinet-review":
@@ -217,6 +242,7 @@ def gather_escalation_findings(project_root: Path) -> list[dict[str, Any]]:
     collect_inbox_findings(project_root, findings)
     collect_evidence_findings(project_root, findings)
     collect_gate_findings(project_root, state, findings)
+    collect_resource_findings(project_root, findings)
     collect_review_loop_findings(project_root, state, findings)
     collect_approval_conflicts(project_root, findings)
     collect_risk_findings(project_root, findings)

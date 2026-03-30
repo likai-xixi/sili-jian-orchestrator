@@ -42,6 +42,30 @@ def proposed_plan(requirement: str) -> list[str]:
     ]
 
 
+def proposed_options(requirement: str) -> list[dict[str, str]]:
+    summary = summarize_requirement(requirement)
+    return [
+        {
+            "id": "option-a",
+            "title": "Lean MVP",
+            "summary": f"Freeze the smallest usable flow for: {summary}",
+            "tradeoff": "Fastest to ship, but more follow-up work lands later.",
+        },
+        {
+            "id": "option-b",
+            "title": "Balanced baseline",
+            "summary": "Clarify constraints, freeze acceptance, then enter autonomous delivery with a stable first batch.",
+            "tradeoff": "Slightly slower at the start, but better suited for unattended execution.",
+        },
+        {
+            "id": "option-c",
+            "title": "Documentation-first",
+            "summary": "Spend the first round on architecture, task tree, and governance completeness before implementation.",
+            "tradeoff": "Highest planning confidence, but the slowest route into coding.",
+        },
+    ]
+
+
 def parse_project_name(request: str) -> str:
     patterns = [
         r"(?:\u9879\u76ee\u540d\u79f0|\u9879\u76ee\u540d)\s*(?:\u53eb|\u662f|\u4e3a|[:\uff1a])\s*([A-Za-z0-9\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff _-]*)",
@@ -58,6 +82,17 @@ def parse_project_name(request: str) -> str:
 
 def render_intake_markdown(payload: dict) -> str:
     plan_lines = "\n".join(f"- {item}" for item in payload.get("proposed_plan", [])) or "- none"
+    option_lines = "\n\n".join(
+        "\n".join(
+            [
+                f"### {item.get('id', '').upper()} {item.get('title', '')}",
+                f"- summary: {item.get('summary', '')}",
+                f"- tradeoff: {item.get('tradeoff', '')}",
+            ]
+        )
+        for item in payload.get("proposed_options", [])
+        if isinstance(item, dict)
+    ) or "- none"
     return f"""# New Project Intake
 
 - created_at: {payload.get('created_at', '')}
@@ -71,6 +106,10 @@ def render_intake_markdown(payload: dict) -> str:
 ## Proposed Plan
 
 {plan_lines}
+
+## Guided Options
+
+{option_lines}
 
 ## Next Prompt
 
@@ -102,10 +141,11 @@ def record_requirement(workspace_root: Path, request: str, actor: str = "user") 
         "project_name": project_name,
         "proposed_project_slug": slugify(project_name) if project_name else "",
         "proposed_plan": proposed_plan(request),
+        "proposed_options": proposed_options(request),
         "next_prompt": (
-            f"\u5df2\u8bc6\u522b\u9879\u76ee\u540d `{project_name}`\uff1b\u786e\u8ba4\u540e\u6211\u4f1a\u81ea\u52a8\u521b\u5efa\u9879\u76ee\u76ee\u5f55\u3001bootstrap \u6cbb\u7406\u9aa8\u67b6\uff0c\u5e76\u8fdb\u5165\u53f8\u793c\u76d1\u81ea\u52a8\u6a21\u5f0f\u3002"
+            f"\u5df2\u8bc6\u522b\u9879\u76ee\u540d `{project_name}`\uff1b\u8bf7\u5728 Lean MVP / Balanced baseline / Documentation-first \u4e09\u79cd\u8def\u5f84\u4e2d\u9009\u4e00\u4e2a\u4f5c\u4e3a\u9996\u8f6e\u65b9\u6848\uff0c\u786e\u8ba4\u540e\u6211\u4f1a\u81ea\u52a8\u521b\u5efa\u9879\u76ee\u76ee\u5f55\u3001bootstrap \u6cbb\u7406\u9aa8\u67b6\uff0c\u5e76\u8fdb\u5165\u53f8\u793c\u76d1\u81ea\u52a8\u6a21\u5f0f\u3002"
             if project_name
-            else "\u8bf7\u544a\u8bc9\u6211\u9879\u76ee\u540d\uff1b\u786e\u8ba4\u540e\u6211\u4f1a\u81ea\u52a8\u521b\u5efa\u9879\u76ee\u76ee\u5f55\u3001bootstrap \u6cbb\u7406\u9aa8\u67b6\uff0c\u5e76\u8fdb\u5165\u53f8\u793c\u76d1\u81ea\u52a8\u6a21\u5f0f\u3002"
+            else "\u8bf7\u544a\u8bc9\u6211\u9879\u76ee\u540d\uff0c\u5e76\u4ece Lean MVP / Balanced baseline / Documentation-first \u4e2d\u9009\u4e00\u4e2a\u9996\u8f6e\u65b9\u6848\uff1b\u786e\u8ba4\u540e\u6211\u4f1a\u81ea\u52a8\u521b\u5efa\u9879\u76ee\u76ee\u5f55\u3001bootstrap \u6cbb\u7406\u9aa8\u67b6\uff0c\u5e76\u8fdb\u5165\u53f8\u793c\u76d1\u81ea\u52a8\u6a21\u5f0f\u3002"
         ),
     }
     write_json(intake_path(workspace_root), payload)

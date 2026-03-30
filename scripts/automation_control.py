@@ -25,6 +25,40 @@ CONTROL_DEFAULTS = {
     "paused_at": None,
     "paused_by": None,
     "resume_action": None,
+    "autonomous_runtime_max_cycles": 50,
+    "autonomous_max_dispatch": 3,
+    "autonomous_failure_streak_limit": 3,
+    "autonomous_idle_streak_limit": 2,
+    "autonomous_auto_commit_enabled": True,
+    "autonomous_auto_commit_push": False,
+    "autonomous_stop_on_customer_decision": True,
+    "session_rotation_policy": {
+        "default": {
+            "max_completion_count": 4,
+            "max_dispatch_count": 6,
+            "max_task_round_count": 3,
+        },
+        "agents": {},
+    },
+    "frozen_by_automation": False,
+    "freeze_reason": None,
+    "decision_report_path": None,
+    "resource_policy": {
+        "default_policy": "mock",
+        "categories": {
+            "credential": "mock",
+            "real-api": "mock",
+            "account": "skip",
+            "permission": "skip",
+            "device": "skip",
+            "sandbox": "mock",
+            "other": "mock",
+        },
+        "release_requires_real_validation": True,
+    },
+    "resource_gaps": [],
+    "resource_gap_history": [],
+    "resource_gap_report_path": None,
 }
 
 
@@ -44,13 +78,60 @@ def ensure_control_state(project_root: Path) -> dict[str, Any]:
     path = state_path(project_root)
     payload = require_valid_json(path, "ai/state/orchestrator-state.json") if path.exists() else {}
     for key, value in CONTROL_DEFAULTS.items():
-        payload.setdefault(key, value)
+        if key not in payload:
+            if isinstance(value, dict):
+                payload[key] = json.loads(json.dumps(value))
+            elif isinstance(value, list):
+                payload[key] = list(value)
+            else:
+                payload[key] = value
     if payload["automation_mode"] not in VALID_AUTOMATION_MODES:
         payload["automation_mode"] = "normal"
     payload["conversation_mode"] = "interactive"
     payload["background_runtime_enabled"] = payload["automation_mode"] == "autonomous"
     write_json(state_path(project_root), payload)
     return payload
+
+
+def autonomy_settings(project_root: Path, state: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = state or ensure_control_state(project_root)
+    rotation_policy = payload.get("session_rotation_policy") if isinstance(payload.get("session_rotation_policy"), dict) else {}
+    default_rotation = rotation_policy.get("default") if isinstance(rotation_policy.get("default"), dict) else {}
+    agent_rotation = rotation_policy.get("agents") if isinstance(rotation_policy.get("agents"), dict) else {}
+    return {
+        "max_cycles": max(1, int(payload.get("autonomous_runtime_max_cycles", 50) or 50)),
+        "max_dispatch": max(1, int(payload.get("autonomous_max_dispatch", 3) or 3)),
+        "failure_streak_limit": max(1, int(payload.get("autonomous_failure_streak_limit", 3) or 3)),
+        "idle_streak_limit": max(1, int(payload.get("autonomous_idle_streak_limit", 2) or 2)),
+        "auto_commit_enabled": bool(payload.get("autonomous_auto_commit_enabled", True)),
+        "auto_commit_push": bool(payload.get("autonomous_auto_commit_push", False)),
+        "stop_on_customer_decision": bool(payload.get("autonomous_stop_on_customer_decision", True)),
+        "session_rotation_policy": {
+            "default": {
+                "max_completion_count": max(1, int(default_rotation.get("max_completion_count", 4) or 4)),
+                "max_dispatch_count": max(1, int(default_rotation.get("max_dispatch_count", 6) or 6)),
+                "max_task_round_count": max(1, int(default_rotation.get("max_task_round_count", 3) or 3)),
+            },
+            "agents": {
+                str(agent_id): {
+                    "max_completion_count": max(
+                        1,
+                        int((config or {}).get("max_completion_count", default_rotation.get("max_completion_count", 4)) or 4),
+                    ),
+                    "max_dispatch_count": max(
+                        1,
+                        int((config or {}).get("max_dispatch_count", default_rotation.get("max_dispatch_count", 6)) or 6),
+                    ),
+                    "max_task_round_count": max(
+                        1,
+                        int((config or {}).get("max_task_round_count", default_rotation.get("max_task_round_count", 3)) or 3),
+                    ),
+                }
+                for agent_id, config in agent_rotation.items()
+                if isinstance(config, dict)
+            },
+        },
+    }
 
 
 def replace_or_append_line(text: str, prefix: str, new_line: str) -> str:
@@ -227,6 +308,8 @@ def set_mode(
         state["paused_at"] = now
         state["paused_by"] = actor
         state["resume_action"] = current_resume_action
+        state["frozen_by_automation"] = True
+        state["freeze_reason"] = reason or "Paused by user request."
         state["next_owner"] = "orchestrator"
         state["next_action"] = (
             f"Automation paused. Resume autonomy, then continue: {current_resume_action}"
@@ -240,6 +323,9 @@ def set_mode(
         state["paused_at"] = None
         state["paused_by"] = None
         state["resume_action"] = current_resume_action if normalized_mode == "armed" else None
+        state["frozen_by_automation"] = False
+        state["freeze_reason"] = None
+        state["decision_report_path"] = None
 
     state["automation_mode"] = normalized_mode
     state["conversation_mode"] = "interactive"
@@ -254,6 +340,32 @@ def set_mode(
     write_json(state_path(project_root), state)
     update_control_markdown(project_root, state)
     sessions = update_sessions_for_mode(project_root, state, normalized_mode, reason=reason)
+    return write_control_reports(project_root, state, sessions, reason=reason)
+
+
+def freeze_for_decision(
+    project_root: Path,
+    reason: str,
+    actor: str = "orchestrator",
+    resume_action: str | None = None,
+    decision_report_path: str | None = None,
+) -> dict[str, Any]:
+    payload = set_mode(project_root, "paused", actor=actor, reason=reason, resume_action=resume_action)
+    state = ensure_control_state(project_root)
+    state["execution_allowed"] = False
+    state["testing_allowed"] = False
+    state["release_allowed"] = False
+    state["frozen_by_automation"] = True
+    state["freeze_reason"] = reason
+    state["decision_report_path"] = decision_report_path
+    state["next_owner"] = "orchestrator"
+    if resume_action:
+        state["next_action"] = f"Decision required. Review the report, choose an option, then resume autonomy: {resume_action}"
+    else:
+        state["next_action"] = "Decision required. Review the report, choose an option, then resume autonomy."
+    write_json(state_path(project_root), state)
+    update_control_markdown(project_root, state)
+    sessions = update_sessions_for_mode(project_root, state, "paused", reason=reason)
     return write_control_reports(project_root, state, sessions, reason=reason)
 
 

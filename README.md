@@ -100,6 +100,7 @@
 
 - [安装说明](./docs/INSTALL.md)
 - [OpenClaw 专用使用说明](./docs/OPENCLAW-GUIDE.md)
+- [防跑偏运行规范](./docs/ANTI-DRIFT-RUNBOOK.md)
 - [使用说明](./docs/USAGE.md)
 - [简易版文档](./docs/SIMPLE.md)
 - [详细版文档](./docs/DETAILED.md)

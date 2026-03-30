@@ -54,6 +54,7 @@ def render_handoff(payload: dict[str, Any], handoff_path: Path) -> str:
 - status: {payload.get('status', 'completed')}
 - task_id: {payload.get('task_id', '')}
 - workflow_step_id: {payload.get('workflow_step_id', '')}
+- task_round_id: {payload.get('task_round_id', '')}
 - summary: {payload.get('summary', '')}
 - files_touched: {touched_value}
 - blockers: {blocker_value}
@@ -123,13 +124,14 @@ def find_matching_active_task(
 
 def consume_completion(project_root: Path, payload: dict[str, Any], allow_untracked_completion: bool = False) -> dict[str, Any]:
     payload = dict(payload)
-    ensure_registry_schema(project_root)
+    registry = ensure_registry_schema(project_root)
     state_path = project_root / "ai" / "state" / "orchestrator-state.json"
     state = require_valid_json(state_path, "ai/state/orchestrator-state.json")
     progress = ensure_workflow_progress(state)
     handoff_path = handoff_path_for(project_root, payload)
 
     agent_id = str(payload.get("agent_id") or payload.get("role") or "orchestrator")
+    session_record = dict(registry.get(agent_id, {}))
     task_id = str(payload.get("task_id") or "").strip()
     step_id = str(payload.get("workflow_step_id") or "").strip()
     status = str(payload.get("status", "completed")).strip().lower()
@@ -159,6 +161,8 @@ def consume_completion(project_root: Path, payload: dict[str, Any], allow_untrac
             )
         matching_task["status"] = status
         matching_task["workflow_step_id"] = step_id or expected_step_id
+        if matching_task.get("task_round_id") and not payload.get("task_round_id"):
+            payload["task_round_id"] = matching_task.get("task_round_id")
         matching_task["handoff_path"] = str(handoff_path.relative_to(project_root)).replace("\\", "/")
         matching_task["blockers"] = blockers if blockers else []
         updated_active = [task for index, task in enumerate(active_tasks) if index != matching_index]
@@ -175,6 +179,7 @@ def consume_completion(project_root: Path, payload: dict[str, Any], allow_untrac
                     "status": status,
                     "handoff_path": str(handoff_path.relative_to(project_root)).replace("\\", "/"),
                     "workflow_step_id": step_id,
+                    "task_round_id": payload.get("task_round_id"),
                     "blockers": blockers if blockers else [],
                 }
             )
@@ -209,6 +214,7 @@ def consume_completion(project_root: Path, payload: dict[str, Any], allow_untrac
         "agent_id": agent_id,
         "task_id": task_id,
         "workflow_step_id": step_id,
+        "task_round_id": payload.get("task_round_id"),
         "status": status,
         "summary": payload.get("summary", ""),
         "updated_at": utc_now(),
@@ -221,12 +227,24 @@ def consume_completion(project_root: Path, payload: dict[str, Any], allow_untrac
         project_root,
         agent_id,
         session_key=payload.get("session_key"),
-        status="blocked" if status in BLOCKED_STATUSES else "idle",
+        status=(
+            "blocked"
+            if status in BLOCKED_STATUSES
+            else ("waiting" if payload.get("session_key") or session_record.get("session_key") else "idle")
+        ),
         last_task_id=task_id or None,
         last_step_id=step_id or None,
         handoff_path=str(handoff_path.relative_to(project_root)).replace("\\", "/"),
         blocked_reason=", ".join(str(item) for item in blockers) if status in BLOCKED_STATUSES and blockers else None,
         active_workflow=state.get("current_workflow"),
+        completion_count=int(session_record.get("completion_count") or 0) + 1,
+        consecutive_invalid_completions=0,
+        drift_status="clear",
+        rebuild_required=False,
+        rebuild_reason=None,
+        clear_fields=["last_invalid_completion_at", "last_invalid_completion_reason", "blocked_reason"]
+        if status not in BLOCKED_STATUSES
+        else ["last_invalid_completion_at", "last_invalid_completion_reason"],
     )
 
     return {

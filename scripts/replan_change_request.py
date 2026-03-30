@@ -63,6 +63,31 @@ def report_stem(request_id: str) -> str:
     return f"replan-{request_id.lower()}"
 
 
+def guided_options(change_request: dict[str, Any]) -> list[dict[str, str]]:
+    action = str(change_request.get("action") or "change")
+    significance = str(change_request.get("significance") or "incremental")
+    return [
+        {
+            "id": "option-a",
+            "title": "Minimal patch",
+            "summary": f"Keep the current batch moving and absorb only the smallest {action} needed right now.",
+            "tradeoff": "Fastest path, but leaves more follow-up work and review risk for later.",
+        },
+        {
+            "id": "option-b",
+            "title": "Structured replan",
+            "summary": f"Re-freeze architecture, task tree, and acceptance around this {significance} change before execution resumes.",
+            "tradeoff": "Most stable option and usually the recommended path, but it pauses execution longer.",
+        },
+        {
+            "id": "option-c",
+            "title": "Split into phases",
+            "summary": "Protect the approved scope in the current batch, move the new request into a follow-up batch, and continue with a narrower delivery target.",
+            "tradeoff": "Balanced risk, but requires clear boundary-setting and explicit customer agreement.",
+        },
+    ]
+
+
 def update_task_tree_for_replan(project_root: Path, request_id: str) -> dict[str, Any]:
     path = project_root / "ai" / "state" / "task-tree.json"
     payload = read_json(path)
@@ -148,6 +173,7 @@ def build_replan_packet(project_root: Path, request_id: str) -> dict[str, Any]:
             "route the revised plan through plan approval",
             "resume autonomy only after the new plan is frozen",
         ],
+        "guided_options": guided_options(task_entry),
     }
     reports_dir = project_root / "ai" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -155,7 +181,8 @@ def build_replan_packet(project_root: Path, request_id: str) -> dict[str, Any]:
     write_json(reports_dir / f"{stem}.json", packet)
     write_text(
         reports_dir / f"{stem}.md",
-        f"""# Replan Packet
+        (
+            f"""# Replan Packet
 
 - request_id: {packet['request_id']}
 - created_at: {packet['created_at']}
@@ -178,7 +205,23 @@ def build_replan_packet(project_root: Path, request_id: str) -> dict[str, Any]:
 
 ## Recommended Flow
 
-""" + "\n".join(f"- {item}" for item in packet["recommended_flow"]) + "\n",
+"""
+            + "\n".join(f"- {item}" for item in packet["recommended_flow"])
+            + "\n\n## Guided Options\n\n"
+            + "\n\n".join(
+                [
+                    "\n".join(
+                        [
+                            f"### {item['id'].upper()} {item['title']}",
+                            f"- summary: {item['summary']}",
+                            f"- tradeoff: {item['tradeoff']}",
+                        ]
+                    )
+                    for item in packet["guided_options"]
+                ]
+            )
+            + "\n"
+        ),
     )
     return packet
 

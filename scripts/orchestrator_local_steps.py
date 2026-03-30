@@ -149,6 +149,8 @@ def render_start_here(project_root: Path, state: dict[str, Any]) -> str:
 - Immediate execution allowed: {'yes' if state.get('execution_allowed') else 'no'}
 - Immediate testing allowed: {'yes' if state.get('testing_allowed') else 'no'}
 - Release allowed: {'yes' if state.get('release_allowed') else 'no'}
+- Resource gap count: {len(state.get('resource_gaps', [])) if isinstance(state.get('resource_gaps'), list) else 0}
+- Resource gap report: {state.get('resource_gap_report_path') or 'pending'}
 
 ## Current Control Summary
 
@@ -197,9 +199,11 @@ def render_project_handoff(project_root: Path, state: dict[str, Any]) -> str:
 - Review escalation level: {state.get('review_escalation_level', 'none')}
 - Review rounds before cabinet: {state.get('review_cycle_count_before_cabinet', 0)} / {state.get('review_cycle_limit_before_cabinet', DEFAULT_REVIEW_CYCLE_LIMIT_BEFORE_CABINET)}
 - Review rounds after cabinet: {state.get('review_cycle_count_after_cabinet', 0)} / {state.get('review_cycle_limit_after_cabinet', DEFAULT_REVIEW_CYCLE_LIMIT_AFTER_CABINET)}
-- Latest plan review conclusion: {extract_field_value(read_text(reports / 'architecture-review.md'), 'Conclusion') or 'pending'}
-- Latest result audit conclusion: {extract_field_value(read_text(reports / 'acceptance-report.md'), 'Final Conclusion') or 'pending'}
-- Latest test conclusion: {extract_field_value(read_text(reports / 'test-report.md'), 'Recommendation') or 'pending'}
+- Latest plan review conclusion: {extract_conclusion(read_text(reports / 'architecture-review.md'), 'Conclusion') or 'pending'}
+- Latest result audit conclusion: {extract_conclusion(read_text(reports / 'acceptance-report.md'), 'Final Conclusion') or 'pending'}
+- Latest test conclusion: {extract_conclusion(read_text(reports / 'test-report.md'), 'Recommendation') or 'pending'}
+- Resource gap count: {len(state.get('resource_gaps', [])) if isinstance(state.get('resource_gaps'), list) else 0}
+- Resource gap report: {state.get('resource_gap_report_path') or 'pending'}
 
 ## Completed
 
@@ -534,6 +538,99 @@ def render_customer_decision_required_markdown(project_root: Path, state: dict[s
     ) + "\n"
 
 
+def customer_decision_options(state: dict[str, Any], review_report: dict[str, Any]) -> list[dict[str, str]]:
+    blockers = review_report.get("blockers", [])
+    blocker_summary = blockers[0] if blockers else "The current plan is still failing review after the cabinet replan."
+    return [
+        {
+            "id": "option-a",
+            "title": "Reduce scope",
+            "summary": "Drop non-critical items from the current batch and continue only with the smallest shippable slice.",
+            "tradeoff": "Delivery stays moving, but some requested outcomes are deferred.",
+        },
+        {
+            "id": "option-b",
+            "title": "Reconfirm requirement and acceptance",
+            "summary": f"Re-open the plan boundary around: {blocker_summary}",
+            "tradeoff": "Most reliable path when the goal or acceptance changed, but it requires another planning pass.",
+        },
+        {
+            "id": "option-c",
+            "title": "Pause the batch",
+            "summary": "Freeze the current delivery batch until dependencies, evidence, or business timing become clearer.",
+            "tradeoff": "Lowest immediate risk, but no further delivery progress happens until the pause is lifted.",
+        },
+        {
+            "id": "option-d",
+            "title": "Terminate the batch",
+            "summary": "End the current delivery batch and archive the unfinished scope.",
+            "tradeoff": "Stops further investment entirely and may require a fresh intake later.",
+        },
+    ]
+
+
+def render_customer_decision_required_markdown_v2(state: dict[str, Any], review_report: dict[str, Any]) -> str:
+    blockers = review_report.get("blockers") or ["The current review issues are still unresolved."]
+    categories = review_report.get("categories") or blocker_categories(blockers)
+    options = customer_decision_options(state, review_report)
+    option_lines = "\n\n".join(
+        "\n".join(
+            [
+                f"### {item['id'].upper()} {item['title']}",
+                f"- summary: {item['summary']}",
+                f"- tradeoff: {item['tradeoff']}",
+            ]
+        )
+        for item in options
+    )
+    return "\n".join(
+        [
+            "# Customer Decision Required",
+            "",
+            "## Current Context",
+            "",
+            "- 当前批次",
+            "- legacy_label: 褰撳墠鎵规",
+            f"- current_workflow: {state.get('current_workflow', 'feature-delivery')}",
+            f"- current_phase: {state.get('current_phase', 'customer-decision')}",
+            f"- current_status: {state.get('current_status', 'await-customer-decision')}",
+            f"- primary_goal: {state.get('primary_goal', 'resolve the current governed delivery batch')}",
+            f"- cabinet_replan_already_used: {'yes' if state.get('cabinet_replan_triggered') else 'no'}",
+            "",
+            "## Why Automation Stopped",
+            "",
+            "- The batch still failed review after the cabinet replan.",
+            "- The post-cabinet review limit has been exhausted.",
+            "- The orchestrator will not continue execution until the customer picks a direction.",
+            "",
+            "## Key Problems",
+            "",
+            f"- blocker_categories: {', '.join(categories) if categories else 'general-review'}",
+            *[f"- {item}" for item in blockers],
+            "",
+            "## Risk",
+            "",
+            "- Continuing without a decision would increase rework, quality drift, and release risk.",
+            "- The current implementation boundary is not stable enough for unattended execution.",
+            "",
+            "## What Has Already Been Tried",
+            "",
+            f"- review_rounds_before_cabinet: {state.get('review_cycle_count_before_cabinet', 0)} / {state.get('review_cycle_limit_before_cabinet', DEFAULT_REVIEW_CYCLE_LIMIT_BEFORE_CABINET)}",
+            f"- review_rounds_after_cabinet: {state.get('review_cycle_count_after_cabinet', 0)} / {state.get('review_cycle_limit_after_cabinet', DEFAULT_REVIEW_CYCLE_LIMIT_AFTER_CABINET)}",
+            f"- latest_review_recommendation: {review_report.get('recommendation', 'PENDING')}",
+            "- One cabinet replan has already been executed and reviewed again.",
+            "",
+            "## Guided Options",
+            "",
+            option_lines,
+            "",
+            "## What To Confirm",
+            "",
+            "- Choose one option explicitly, then the orchestrator can thaw the frozen work and continue.",
+        ]
+    ) + "\n"
+
+
 def write_customer_decision_required_report(project_root: Path, state: dict[str, Any], review_report: dict[str, Any]) -> None:
     reports = reports_dir(project_root)
     payload = {
@@ -552,17 +649,12 @@ def write_customer_decision_required_report(project_root: Path, state: dict[str,
         "review_recommendation": review_report.get("recommendation", "PENDING"),
         "problems": review_report.get("blockers", []),
         "categories": review_report.get("categories", []),
-        "options": [
-            "scope-reduction",
-            "reconfirm-requirement-and-acceptance",
-            "pause-batch",
-            "terminate-batch",
-        ],
+        "options": customer_decision_options(state, review_report),
     }
     write_json(reports / "customer-decision-required.json", payload)
     write_text(
         reports / "customer-decision-required.md",
-        render_customer_decision_required_markdown(project_root, state, review_report),
+        render_customer_decision_required_markdown_v2(state, review_report),
     )
 
 
@@ -754,6 +846,73 @@ def planning_follow_up(info: dict[str, Any]) -> str:
     return actions[0] if actions else "Continue the governed workflow."
 
 
+def planning_guided_options(info: dict[str, Any]) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    if not info.get("architecture_ready") or not info.get("task_tree_ready"):
+        options.append(
+            {
+                "id": "option-a",
+                "title": "Finish the planning package",
+                "summary": "Complete architecture.md, task-tree.json, and plan review before any execution starts.",
+                "tradeoff": "Safest path for unattended delivery, but it delays implementation until the planning surface is complete.",
+            }
+        )
+    if info.get("implementation_baseline_required") and (
+        not info.get("implementation_summary_ready") or not info.get("customer_acknowledged_implementation")
+    ):
+        options.append(
+            {
+                "id": "option-b",
+                "title": "Freeze the current baseline first",
+                "summary": "Summarize the existing implementation, have the customer acknowledge it, then convert requirements into the next batch plan.",
+                "tradeoff": "Best for takeover projects, but it adds a confirmation checkpoint before planning can finish.",
+            }
+        )
+    if not info.get("customer_confirmed_requirement") or not info.get("development_approved"):
+        options.append(
+            {
+                "id": "option-c",
+                "title": "Clarify scope with the customer",
+                "summary": "Stop expanding the plan until the requirement boundary, acceptance criteria, and permission to start are all explicit.",
+                "tradeoff": "Removes ambiguity, but requires a customer reply before autonomy can continue.",
+            }
+        )
+    if not options:
+        options.append(
+            {
+                "id": "option-a",
+                "title": "Continue the governed workflow",
+                "summary": "The planning surface is already coherent; continue through the normal plan approval flow.",
+                "tradeoff": "No special intervention required.",
+            }
+        )
+    return options
+
+
+def write_planning_options_report(project_root: Path, info: dict[str, Any]) -> None:
+    options = planning_guided_options(info)
+    content = [
+        "# Planning Options",
+        "",
+        f"- current_status: {info.get('current_status', 'draft')}",
+        f"- planning_ready: {'yes' if info.get('planning_ready') else 'no'}",
+        f"- next_action: {info.get('next_action', 'continue planning')}",
+        "",
+        "## Guided Options",
+        "",
+    ]
+    for item in options:
+        content.extend(
+            [
+                f"### {item['id'].upper()} {item['title']}",
+                f"- summary: {item['summary']}",
+                f"- tradeoff: {item['tradeoff']}",
+                "",
+            ]
+        )
+    write_text(reports_dir(project_root) / "planning-options.md", "\n".join(content).rstrip() + "\n")
+
+
 def build_department_matrix(project_root: Path, state: dict[str, Any], step_id: str) -> None:
     sync_review_controls(project_root, state)
     handoff_root = project_root / "ai" / "handoff"
@@ -914,7 +1073,15 @@ def apply_post_completion_state(project_root: Path, step: WorkflowStep) -> None:
                 state["execution_allowed"] = False
                 state["testing_allowed"] = False
                 state["release_allowed"] = False
-                state["next_action"] = planning_follow_up(info)
+                options = planning_guided_options(info)
+                if len(options) > 1 or any(item.get("id") != "option-a" for item in options):
+                    write_planning_options_report(project_root, info)
+                    state["next_action"] = (
+                        "Review ai/reports/planning-options.md, choose the most suitable planning route, and then continue with the first required action: "
+                        + planning_follow_up(info)
+                    )
+                else:
+                    state["next_action"] = planning_follow_up(info)
                 state["next_owner"] = "orchestrator"
         elif workflow == "resume-orchestrator":
             state["next_action"] = "Review the recovery summary and choose the next governed workflow."

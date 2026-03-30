@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from common import PASS_CONCLUSIONS, extract_conclusion, extract_field_value, read_json, read_text
+from resource_requirements import write_report as write_resource_gap_report
 
 
 REVIEW_ROLES = ["libu2", "hubu", "gongbu", "bingbu", "libu", "xingbu"]
@@ -271,6 +272,7 @@ def validate(project_root: Path) -> dict:
     matrix_text = read_text(reports_dir / "department-approval-matrix.md")
     acceptance_text = read_text(reports_dir / "acceptance-report.md")
     gate_text = read_text(reports_dir / "gate-report.md")
+    resource_report = write_resource_gap_report(project_root)
 
     blocker_sources = []
     placeholder_sources = []
@@ -285,6 +287,8 @@ def validate(project_root: Path) -> dict:
             blocker_sources.append(name)
         if text and has_unresolved_placeholders(text):
             placeholder_sources.append(name)
+    if resource_report.get("blocking_gap_count") or resource_report.get("release_validation_pending"):
+        blocker_sources.append("resource-gap-report.md")
 
     test_conclusion = extract_conclusion(test_text, "Recommendation").upper()
     matrix_recommendation = extract_conclusion(matrix_text, "Recommendation").upper()
@@ -374,6 +378,9 @@ def validate(project_root: Path) -> dict:
         "mainline_regression": mainline_regression,
         "rollback_point_available": rollback_point,
         "release_allowed": release_allowed,
+        "resource_gap_count": resource_report.get("resource_gap_count", 0),
+        "resource_due_now_count": resource_report.get("due_now_count", 0),
+        "resource_requires_user_input": resource_report.get("requires_user_input", False),
         "phase_gate_passed": phase_gate_passed,
         "release_stage": release_stage,
         "final_gate_passed": final_gate_passed,

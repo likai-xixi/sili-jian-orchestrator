@@ -31,10 +31,7 @@ def collect_git_tracked_py_targets() -> list[Path]:
 
 
 def collect_py_targets() -> list[Path]:
-    tracked = collect_git_tracked_py_targets()
-    if tracked:
-        return tracked
-    targets: set[Path] = set()
+    targets: set[Path] = set(collect_git_tracked_py_targets())
     roots = [
         REPO_ROOT / "scripts",
         REPO_ROOT / "tests",

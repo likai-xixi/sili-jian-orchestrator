@@ -14,6 +14,7 @@
 - `ai/reports/department-approval-matrix.md`
 - `ai/reports/review-history.md`
 - `ai/reports/acceptance-report.md`
+- `ai/reports/resource-gap-report.md`
 - `docs/`
 
 ## Deprecated Documents
@@ -29,6 +30,8 @@
 - `ai/reports/customer-decision-required.md`
 - `ai/reports/customer-decision-resolution.md`
 - `docs/requirement-communication-template.md`
+- `docs/ANTI-DRIFT-RUNBOOK.md`
+- `docs/RESOURCE-DEPENDENCY-POLICIES.md`
 
 ## Current Effective Versions
 

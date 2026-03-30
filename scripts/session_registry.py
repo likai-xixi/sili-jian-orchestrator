@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from common import HANDOFF_DIRS, read_json, require_valid_json, utc_now, write_json
+from runtime_guardrails import session_completion_limit, session_dispatch_limit, session_reuse_budget_decision
 
 
 SESSION_DEFAULTS = {
@@ -18,6 +19,17 @@ SESSION_DEFAULTS = {
     "resume_prompt": None,
     "active_workflow": None,
     "blocked_reason": None,
+    "dispatch_count": 0,
+    "completion_count": 0,
+    "task_round_count": 0,
+    "consecutive_invalid_completions": 0,
+    "last_invalid_completion_at": None,
+    "last_invalid_completion_reason": None,
+    "drift_status": "clear",
+    "rebuild_required": False,
+    "rebuild_reason": None,
+    "last_rebuild_at": None,
+    "last_rollover_at": None,
 }
 
 
@@ -57,10 +69,12 @@ def load_registry(project_root: Path, ensure_defaults: bool = False) -> dict[str
     return payload if payload else {}
 
 
-def upsert_session(project_root: Path, agent_id: str, **fields: Any) -> dict[str, Any]:
+def upsert_session(project_root: Path, agent_id: str, clear_fields: list[str] | None = None, **fields: Any) -> dict[str, Any]:
     payload = ensure_registry_schema(project_root)
     record = normalize_record(agent_id, payload.get(agent_id))
     record.update({key: value for key, value in fields.items() if value is not None})
+    for key in clear_fields or []:
+        record[key] = None
     record["agent_id"] = agent_id
     record["last_heartbeat_at"] = fields.get("last_heartbeat_at") or utc_now()
     payload[agent_id] = record
@@ -69,16 +83,67 @@ def upsert_session(project_root: Path, agent_id: str, **fields: Any) -> dict[str
 
 
 def reusable_session_key(project_root: Path, agent_id: str, workflow_name: str | None = None) -> str | None:
+    return str(session_reuse_decision(project_root, agent_id, workflow_name).get("session_key") or "") or None
+
+
+def session_rotation_limits(project_root: Path, agent_id: str) -> dict[str, int]:
+    state = read_json(project_root / "ai" / "state" / "orchestrator-state.json")
+    rotation = state.get("session_rotation_policy") if isinstance(state.get("session_rotation_policy"), dict) else {}
+    defaults = rotation.get("default") if isinstance(rotation.get("default"), dict) else {}
+    agent_overrides = rotation.get("agents") if isinstance(rotation.get("agents"), dict) else {}
+    override = agent_overrides.get(agent_id) if isinstance(agent_overrides.get(agent_id), dict) else {}
+
+    def _limit(name: str, fallback: int) -> int:
+        raw = override.get(name, defaults.get(name, fallback))
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = fallback
+        return value if value > 0 else fallback
+
+    return {
+        "max_completion_count": _limit("max_completion_count", session_completion_limit()),
+        "max_dispatch_count": _limit("max_dispatch_count", session_dispatch_limit()),
+        "max_task_round_count": _limit("max_task_round_count", 3),
+    }
+
+
+def session_reuse_decision(project_root: Path, agent_id: str, workflow_name: str | None = None) -> dict[str, Any]:
     payload = ensure_registry_schema(project_root)
-    record = payload.get(agent_id, {})
+    record = normalize_record(agent_id, payload.get(agent_id))
     session_key = record.get("session_key")
     status = str(record.get("status", "idle")).lower()
     active_workflow = str(record.get("active_workflow") or "").strip()
+    decision = {
+        "agent_id": agent_id,
+        "record": record,
+        "session_key": None,
+        "status": "spawn",
+        "reason": "No reusable session key is available.",
+        "should_retire": False,
+    }
     if workflow_name and active_workflow and active_workflow != workflow_name:
-        return None
-    if session_key and status in {"active", "running", "waiting", "queued", "paused"}:
-        return str(session_key)
-    return None
+        decision["reason"] = f"Persisted session workflow `{active_workflow}` does not match `{workflow_name}`."
+        return decision
+    if not session_key or status not in {"active", "running", "waiting", "queued", "paused"}:
+        decision["reason"] = "No active reusable session is persisted for this agent."
+        return decision
+    limits = session_rotation_limits(project_root, agent_id)
+    reusable, reason = session_reuse_budget_decision(
+        record,
+        completion_limit=limits["max_completion_count"],
+        dispatch_limit=limits["max_dispatch_count"],
+        task_round_limit=limits["max_task_round_count"],
+    )
+    if not reusable:
+        decision["reason"] = reason
+        decision["should_retire"] = True
+        return decision
+    decision["status"] = "send"
+    decision["session_key"] = str(session_key)
+    decision["reason"] = reason
+    decision["rotation_limits"] = limits
+    return decision
 
 
 def main() -> None:

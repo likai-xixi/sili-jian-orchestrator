@@ -45,6 +45,22 @@
   "paused_at": null,
   "paused_by": null,
   "resume_action": null,
+  "resource_policy": {
+    "default_policy": "mock",
+    "categories": {
+      "credential": "mock",
+      "real-api": "mock",
+      "account": "skip",
+      "permission": "skip",
+      "device": "skip",
+      "sandbox": "mock",
+      "other": "mock"
+    },
+    "release_requires_real_validation": true
+  },
+  "resource_gaps": [],
+  "resource_gap_history": [],
+  "resource_gap_report_path": null,
   "last_heartbeat_goal": "Initialize governance and planning artifacts.",
   "last_heartbeat_reason": "No execution is allowed until the first plan is frozen, reviewed, and confirmed by the customer.",
   "execution_allowed": false,

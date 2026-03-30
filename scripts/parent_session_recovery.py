@@ -178,12 +178,13 @@ Pause reason: {state.get('pause_reason', '')}
 
 Before acting:
 1. Read ai/state/START_HERE.md
-2. Read ai/state/project-handoff.md
-3. Read ai/state/orchestrator-state.json
-4. Read ai/state/agent-sessions.json
-5. Read ai/reports/runtime-loop-summary.json
-6. Read ai/reports/escalation-report.md
-7. If present, resume or re-create the orchestrator child session and continue the workflow.
+2. Read docs/ANTI-DRIFT-RUNBOOK.md
+3. Read ai/state/project-handoff.md
+4. Read ai/state/orchestrator-state.json
+5. Read ai/state/agent-sessions.json
+6. Read ai/reports/runtime-loop-summary.json
+7. Read ai/reports/escalation-report.md
+8. If present, resume or re-create the orchestrator child session and continue the workflow.
 """
     payload = {
         "created_at": utc_now(),

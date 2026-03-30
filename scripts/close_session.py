@@ -149,25 +149,38 @@ def apply_close(project_root: Path, agent_id: str, reason: str, force_native: bo
     payload["native_close_status"] = native["status"]
     payload["native_close_command_source"] = native.get("command_source", "missing")
     payload["native_close_blocked_reason"] = native.get("blocked_reason") or None
+    retired = native["status"] in {"closed", "logical-only", "skipped-no-session"}
+    payload["retired"] = retired
 
     registry = ensure_registry_schema(project_root)
     record = dict(registry.get(agent_id, {}))
-    record["status"] = "closed"
-    record["blocked_reason"] = reason
-    if native["status"] == "closed":
-        record["session_key"] = None
+    if retired:
+        record["status"] = "closed"
+        record["blocked_reason"] = reason
+        if native["status"] in {"closed", "skipped-no-session"}:
+            record["session_key"] = None
+    else:
+        record["blocked_reason"] = (
+            f"{reason} Close attempt is still unresolved: {native.get('blocked_reason') or native['status']}."
+        )
     registry[agent_id] = record
     write_json(project_root / "ai" / "state" / "agent-sessions.json", registry)
 
     state_path = project_root / "ai" / "state" / "orchestrator-state.json"
     state = read_json(state_path)
     active_tasks = state.get("active_tasks", [])
-    for task in active_tasks:
-        if str(task.get("role") or "") == agent_id and str(task.get("status") or "").lower() not in {"completed", "closed"}:
-            task["status"] = "closed"
-    state["active_tasks"] = active_tasks
     state["next_owner"] = "orchestrator"
-    state["next_action"] = f"Session for {agent_id} was closed. Reassign work or continue with another agent."
+    if retired:
+        for task in active_tasks:
+            if str(task.get("role") or "") == agent_id and str(task.get("status") or "").lower() not in {"completed", "closed"}:
+                task["status"] = "closed"
+        state["active_tasks"] = active_tasks
+        state["next_action"] = f"Session for {agent_id} was closed. Reassign work or continue with another agent."
+    else:
+        state["active_tasks"] = active_tasks
+        state["next_action"] = (
+            f"Session close for {agent_id} is blocked. Resolve the native close issue before dispatching replacement work."
+        )
     write_json(state_path, state)
 
     update_project_handoff(project_root, agent_id, reason, payload["native_close_status"])

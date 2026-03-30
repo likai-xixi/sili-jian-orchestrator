@@ -167,6 +167,21 @@ def write_change_request_report(project_root: Path, payload: dict[str, Any]) -> 
     reports_dir = project_root / "ai" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     stem = slugify(payload["request_id"].lower())
+    options = payload.get("guided_options", []) if isinstance(payload.get("guided_options"), list) else []
+    option_lines = (
+        "\n\n".join(
+            "\n".join(
+                [
+                    f"### {item.get('id', '').upper()} {item.get('title', '')}",
+                    f"- summary: {item.get('summary', '')}",
+                    f"- tradeoff: {item.get('tradeoff', '')}",
+                ]
+            )
+            for item in options
+            if isinstance(item, dict)
+        )
+        or "### OPTION-B Structured replan\n- summary: Freeze the change into architecture, task tree, and acceptance before resuming execution.\n- tradeoff: Slower now, safer later."
+    )
     write_json(reports_dir / f"{stem}.json", payload)
     write_text(
         reports_dir / f"{stem}.md",
@@ -187,6 +202,10 @@ def write_change_request_report(project_root: Path, payload: dict[str, Any]) -> 
 ## Recommended Next Action
 
 - {payload['recommended_next_action']}
+
+## Guided Options
+
+{option_lines}
 """,
     )
 
@@ -253,6 +272,7 @@ def apply_change_request(project_root: Path, request: str, actor: str = "user") 
         "recommended_next_action": recommended_next_action,
         "task_tree_entry": task_tree_entry,
         "replan_packet": replan_packet,
+        "guided_options": (replan_packet or {}).get("guided_options", []),
     }
     write_change_request_report(project_root, payload)
     return payload
