@@ -143,13 +143,15 @@ def main() -> None:
     payload_path = Path(args.payload_file).resolve()
     if args.action == "parent-attach":
         result = run_parent_attach(payload_path)
+        expected_status = "attached"
     elif args.action == "close-session":
         result = run_close_session(payload_path)
+        expected_status = "closed"
     else:
         raise SystemExit(f"Unsupported bridge action: {args.action}")
 
     print(json.dumps(result, indent=2, ensure_ascii=False))
-    if result["status"] != "attached":
+    if result["status"] != expected_status:
         raise SystemExit(1)
 
 

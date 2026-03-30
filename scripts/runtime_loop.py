@@ -276,6 +276,29 @@ def run_loop(
             status = "paused-for-decision"
             break
         dispatch = run_orchestrator.run(project_root, max_dispatch=resolved_max_dispatch, transport=transport)
+        if dispatch.get("status") == "state-validation-blocked":
+            freeze = automation_control.freeze_for_decision(
+                project_root,
+                reason=dispatch.get("message", "State validation blocked autonomous execution."),
+                actor="runtime_loop",
+                resume_action="Repair the guarded state evidence, rerun validation, then resume autonomous execution.",
+                decision_report_path=dispatch.get("report_path"),
+            )
+            cycle = {
+                "cycle": cycle_index,
+                "pre_inbox": pre_inbox,
+                "dispatch": dispatch,
+                "delivery": {"sent_count": 0, "failed_count": 0, "pending_config_count": 0},
+                "post_inbox": {"processed_count": 0, "failed_count": 0, "guarded_count": 0},
+                "evidence": {"status": "skipped-state-validation-block"},
+                "escalation": {"status": "state-validation-blocked"},
+                "auto_commit": {"status": "skipped-state-validation-block"},
+                "completed_task_round": None,
+                "decision_freeze": freeze,
+            }
+            cycles.append(cycle)
+            status = "paused-for-decision"
+            break
         delivery = deliver_outbox(project_root, max_items=max_deliveries)
         post_inbox = inbox_watcher.process_inbox(project_root, max_items=max_completions)
         evidence = evidence_collector.collect_evidence(project_root) if collect_evidence else {"status": "skipped"}

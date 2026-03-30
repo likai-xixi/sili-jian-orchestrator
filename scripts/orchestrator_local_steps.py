@@ -9,6 +9,7 @@ from common import (
     extract_conclusion,
     extract_field_value,
     inspect_project,
+    next_step_guidance,
     read_json,
     read_text,
     utc_now,
@@ -371,6 +372,39 @@ def blocker_categories(blockers: list[str]) -> list[str]:
     return categories
 
 
+def cross_review_source_snapshot(project_root: Path) -> dict[str, Any]:
+    registry = load_registry(project_root)
+    handoff_root = (project_root / "ai" / "handoff").resolve()
+    statuses: dict[str, dict[str, Any]] = {}
+    missing_roles: list[str] = []
+    for role in CROSS_REVIEW_ROLES:
+        record = registry.get(role, {}) if isinstance(registry, dict) else {}
+        handoff_value = str(record.get("handoff_path") or "").strip()
+        role_status = ""
+        handoff_exists = False
+        if handoff_value:
+            candidate = Path(handoff_value)
+            if not candidate.is_absolute():
+                candidate = project_root / candidate
+            candidate = candidate.resolve()
+            try:
+                candidate.relative_to(handoff_root)
+            except ValueError:
+                candidate = None
+            if candidate is not None and candidate.exists():
+                handoff_exists = True
+                role_status = extract_field_value(read_text(candidate), "status").lower() or "completed"
+        statuses[role] = {"has_handoff": handoff_exists, "status": role_status or "missing"}
+        if not handoff_exists:
+            missing_roles.append(role)
+    return {
+        "roles": CROSS_REVIEW_ROLES,
+        "statuses": statuses,
+        "missing_roles": missing_roles,
+        "all_present": not missing_roles,
+    }
+
+
 def matrix_review_snapshot(project_root: Path) -> dict[str, Any]:
     matrix_text = read_text(reports_dir(project_root) / "department-approval-matrix.md")
     recommendation = extract_conclusion(matrix_text, "Recommendation").upper() or "PENDING"
@@ -386,13 +420,33 @@ def matrix_review_snapshot(project_root: Path) -> dict[str, Any]:
         for item in categories_raw.split(",")
         if item.strip() and item.strip().lower() not in {"none", "n/a", "na"}
     ]
+    matrix_reviewers = [
+        line.strip()[len("## Reviewer ") :].strip()
+        for line in matrix_text.splitlines()
+        if line.strip().startswith("## Reviewer ")
+    ]
+    source_snapshot = cross_review_source_snapshot(project_root)
+    missing_reviewers = [role for role in CROSS_REVIEW_ROLES if role not in matrix_reviewers]
+    if not matrix_text.strip():
+        blockers.append("department approval matrix is missing")
+    if source_snapshot["missing_roles"]:
+        blockers.extend(f"missing cross-review handoff from {role}" for role in source_snapshot["missing_roles"])
+    if missing_reviewers:
+        blockers.append("department approval matrix is missing reviewer sections for: " + ", ".join(missing_reviewers))
+    blockers = sorted(set(item for item in blockers if item))
     if not categories:
         categories = blocker_categories(blockers)
+    if blockers and recommendation in {"PASS", "PASS_WITH_WARNING"}:
+        recommendation = "BLOCKER"
     return {
         "recommendation": recommendation,
         "blockers": blockers,
         "categories": categories,
         "matrix_text": matrix_text,
+        "matrix_reviewers": matrix_reviewers,
+        "missing_reviewers": missing_reviewers,
+        "has_complete_matrix_sources": source_snapshot["all_present"] and not missing_reviewers and bool(matrix_text.strip()),
+        "source_snapshot": source_snapshot,
     }
 
 
@@ -1173,6 +1227,8 @@ def execute_local_step(project_root: Path, step: WorkflowStep, task_id: str) -> 
         allow_untracked_completion=True,
     )
     apply_post_completion_state(project_root, step)
+    updated_state = read_json(state_path(project_root))
+    guidance = next_step_guidance(updated_state)
     return {
         "task_id": task_id,
         "step_id": step.id,
@@ -1180,4 +1236,10 @@ def execute_local_step(project_root: Path, step: WorkflowStep, task_id: str) -> 
         "status": "local-completed",
         "handoff_path": result["handoff_path"],
         "summary": step_summary,
+        "next_owner": updated_state.get("next_owner", ""),
+        "next_action": updated_state.get("next_action", ""),
+        "requires_confirmation": guidance["requires_confirmation"],
+        "continuation_mode": guidance["continuation_mode"],
+        "next_step_hint": guidance["human_hint"],
+        "next_step_summary": guidance["summary"],
     }

@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from common import read_json, require_valid_json, utc_now, write_json, write_text
+from common import next_step_guidance, read_json, require_valid_json, utc_now, write_json, write_text
 from session_registry import ensure_registry_schema, upsert_session
 from workflow_engine import ensure_workflow_progress
 
@@ -246,6 +246,7 @@ def consume_completion(project_root: Path, payload: dict[str, Any], allow_untrac
         if status not in BLOCKED_STATUSES
         else ["last_invalid_completion_at", "last_invalid_completion_reason"],
     )
+    guidance = next_step_guidance(state)
 
     return {
         "agent_id": agent_id,
@@ -253,7 +254,12 @@ def consume_completion(project_root: Path, payload: dict[str, Any], allow_untrac
         "workflow_step_id": step_id,
         "status": status,
         "handoff_path": str(handoff_path),
+        "next_owner": state.get("next_owner", ""),
         "next_action": state.get("next_action", ""),
+        "requires_confirmation": guidance["requires_confirmation"],
+        "continuation_mode": guidance["continuation_mode"],
+        "next_step_hint": guidance["human_hint"],
+        "next_step_summary": guidance["summary"],
     }
 
 

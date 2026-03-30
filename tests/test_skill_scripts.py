@@ -133,9 +133,13 @@ raise SystemExit(1)
 """,
         encoding="utf-8",
     )
-    command = cli_dir / "openclaw.cmd"
-    command.write_text(f'@"{sys.executable}" "{handler}" %*\n', encoding="utf-8")
-    return command
+    shell_command = cli_dir / "openclaw"
+    shell_command.write_text(f'#!/bin/sh\n"{sys.executable}" "{handler}" "$@"\n', encoding="utf-8")
+    os.chmod(shell_command, 0o755)
+
+    cmd_command = cli_dir / "openclaw.cmd"
+    cmd_command.write_text(f'@"{sys.executable}" "{handler}" %*\n', encoding="utf-8")
+    return shell_command if os.name != "nt" else cmd_command
 
 
 class GovernanceScriptRegressionTests(unittest.TestCase):
@@ -600,6 +604,68 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertFalse((project_root / "ai" / "reports" / "orchestrator-rollover.md").exists())
             state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
             self.assertIn("Await completion from active tasks", state["next_action"])
+
+    def test_run_orchestrator_blocks_when_formal_department_review_sources_are_incomplete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "next_owner": "bingbu",
+                        "next_action": "Dispatch formal testing after review.",
+                        "workflow_progress": {
+                            "completed_steps": [
+                                "intake-feature",
+                                "confirm-or-replan",
+                                "plan-approval",
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                                "libu2-cross-review",
+                                "hubu-cross-review",
+                                "gongbu-cross-review",
+                                "bingbu-cross-review",
+                                "libu-cross-review",
+                                "xingbu-cross-review",
+                                "duchayuan-cross-review",
+                                "department-review",
+                            ],
+                            "blocked_steps": [],
+                            "dispatched_steps": [],
+                        },
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: department-review\n- Workflow: feature-delivery\n- Next owner: bingbu\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: department-review\n- Current phase: department-review\n- Current workflow: feature-delivery\n- Next owner: bingbu\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "department-approval-matrix.md").write_text(
+                "# Department Approval Matrix\n\n## Reviewer duchayuan\n- libu2: PASS\n\n## Recommendation\n\n- PASS\n",
+                encoding="utf-8",
+            )
+
+            result = run_orchestrator.run(project_root, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(result["status"], "state-validation-blocked")
+            self.assertTrue((reports_dir / "department-review-source-guard.md").exists())
 
     def test_run_orchestrator_preserves_invalid_state_after_local_step_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1320,6 +1386,79 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertFalse(frozen["execution_allowed"])
             report = (project_root / "ai" / "reports" / "resource-gap-report.md").read_text(encoding="utf-8")
             self.assertIn("Stripe live key", report)
+
+    def test_runtime_loop_freezes_when_formal_department_review_sources_are_incomplete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "automation_mode": "autonomous",
+                        "next_owner": "bingbu",
+                        "next_action": "Dispatch formal testing after review.",
+                        "workflow_progress": {
+                            "completed_steps": [
+                                "intake-feature",
+                                "confirm-or-replan",
+                                "plan-approval",
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                                "libu2-cross-review",
+                                "hubu-cross-review",
+                                "gongbu-cross-review",
+                                "bingbu-cross-review",
+                                "libu-cross-review",
+                                "xingbu-cross-review",
+                                "duchayuan-cross-review",
+                                "department-review",
+                            ],
+                            "blocked_steps": [],
+                            "dispatched_steps": [],
+                        },
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: department-review\n- Workflow: feature-delivery\n- Next owner: bingbu\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: department-review\n- Current phase: department-review\n- Current workflow: feature-delivery\n- Next owner: bingbu\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "department-approval-matrix.md").write_text(
+                "# Department Approval Matrix\n\n## Reviewer duchayuan\n- libu2: PASS\n\n## Recommendation\n\n- PASS\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch("runtime_loop.runtime_environment.ensure_runtime_environment"), mock.patch(
+                "runtime_loop.environment_bootstrap.ensure_environment", return_value={"status": "ok"}
+            ), mock.patch(
+                "runtime_loop.context_rollover.context_rollover_required", return_value={"should_rollover": False}
+            ), mock.patch(
+                "runtime_loop.parent_session_recovery.build_parent_recovery", return_value={}
+            ), mock.patch(
+                "runtime_loop.parent_session_recovery.write_recovery_artifacts", return_value={}
+            ):
+                summary = runtime_loop.run_loop(project_root, max_cycles=1, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(summary["status"], "paused-for-decision")
+            self.assertEqual(summary["cycles"][0]["dispatch"]["status"], "state-validation-blocked")
+            self.assertEqual(summary["cycles"][0]["decision_freeze"]["automation_mode"], "paused")
+            self.assertTrue((reports_dir / "department-review-source-guard.md").exists())
 
     def test_resource_gap_round_trip_requires_retest_before_closing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2267,6 +2406,12 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertEqual(decision["session_key"], "session-libu2")
             self.assertEqual(decision["status"], "send")
             self.assertTrue((project_root / "ai" / "handoff" / "libu2" / "active" / "LIBU2_IMPLEMENTATION-1.md").exists())
+            self.assertEqual(result["next_owner"], "orchestrator")
+            self.assertFalse(result["requires_confirmation"])
+            self.assertEqual(result["continuation_mode"], "manual-trigger-required")
+            self.assertIn("Review completion from libu2", result["next_action"])
+            self.assertIn("next_owner=orchestrator", result["next_step_summary"])
+            self.assertIn("Manual trigger needed", result["next_step_hint"])
 
     def test_completion_consumer_rejects_untracked_peer_completion(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3211,6 +3356,32 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             report = json.loads(completed.stdout)
             self.assertEqual(report["status"], "attached")
             self.assertTrue((payload_path.with_suffix(".cli-attached.txt")).exists())
+
+    def test_openclaw_runtime_bridge_tries_close_session_cli_variants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            temp_root = Path(tmp)
+            payload_path = temp_root / "orchestrator-close-session.json"
+            payload_path.write_text(
+                json.dumps({"session_key": "sess-cli-close", "agent_id": "orchestrator"}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            cli_dir = temp_root / "cli"
+            write_fake_openclaw_cli(cli_dir)
+            env = dict(os.environ)
+            env["PATH"] = str(cli_dir) + os.pathsep + env.get("PATH", "")
+
+            completed = subprocess.run(
+                [sys.executable, str(SCRIPTS_DIR / "openclaw_runtime_bridge.py"), "close-session", str(payload_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            report = json.loads(completed.stdout)
+            self.assertEqual(report["status"], "closed")
+            self.assertTrue((payload_path.with_suffix(".cli-closed.txt")).exists())
 
     def test_close_session_closes_native_session_and_retires_registry(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -4606,6 +4777,146 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             report = validate_state.validate(project_root)
             codes = {item["code"] for item in report["findings"]}
             self.assertNotIn("workflow_step_not_in_current_workflow", codes)
+
+    def test_validate_state_rejects_formal_department_review_without_full_matrix_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "bingbu",
+                        "next_action": "Dispatch formal testing after review.",
+                        "workflow_progress": {
+                            "completed_steps": [
+                                "intake-feature",
+                                "confirm-or-replan",
+                                "plan-approval",
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                                "libu2-cross-review",
+                                "hubu-cross-review",
+                                "gongbu-cross-review",
+                                "bingbu-cross-review",
+                                "libu-cross-review",
+                                "xingbu-cross-review",
+                                "duchayuan-cross-review",
+                                "department-review",
+                            ]
+                        },
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: department-review\n- Workflow: feature-delivery\n- Next owner: bingbu\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: department-review\n- Current phase: department-review\n- Current workflow: feature-delivery\n- Next owner: bingbu\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "department-approval-matrix.md").write_text(
+                "# Department Approval Matrix\n\n## Reviewer duchayuan\n- libu2: PASS\n- hubu: PASS\n\n## Recommendation\n\n- PASS\n",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertIn("incomplete_department_review_sources", codes)
+
+    def test_validate_state_rejects_formal_department_review_before_cross_reviews_complete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "bingbu",
+                        "next_action": "Dispatch formal testing after review.",
+                        "workflow_progress": {
+                            "completed_steps": [
+                                "intake-feature",
+                                "confirm-or-replan",
+                                "plan-approval",
+                                "libu2-implementation",
+                                "hubu-implementation",
+                                "gongbu-implementation",
+                                "libu2-cross-review",
+                                "hubu-cross-review",
+                                "gongbu-cross-review",
+                                "department-review",
+                            ]
+                        },
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: department-review\n- Workflow: feature-delivery\n- Next owner: bingbu\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: department-review\n- Current phase: department-review\n- Current workflow: feature-delivery\n- Next owner: bingbu\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "department-approval-matrix.md").write_text(
+                """# Department Approval Matrix
+
+## Reviewer libu2
+- hubu: PASS
+
+## Reviewer hubu
+- libu2: PASS
+
+## Reviewer gongbu
+- libu2: PASS
+
+## Reviewer bingbu
+- libu2: PASS
+
+## Reviewer libu
+- libu2: PASS
+
+## Reviewer xingbu
+- libu2: PASS
+
+## Reviewer duchayuan
+- libu2: PASS
+
+## Recommendation
+
+- PASS
+""",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertIn("department_review_before_cross_reviews_complete", codes)
 
     def test_validate_state_detects_mismatch_with_lowercase_markdown_labels(self):
         with tempfile.TemporaryDirectory() as tmp:

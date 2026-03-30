@@ -120,6 +120,50 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def next_step_guidance(state: dict[str, Any], automation_mode: str | None = None) -> dict[str, Any]:
+    next_owner = str(state.get("next_owner", "")).strip()
+    next_action = str(state.get("next_action", "")).strip()
+    current_status = str(state.get("current_status", "")).strip().lower()
+    current_phase = str(state.get("current_phase", "")).strip().lower()
+    mode = str(automation_mode or state.get("automation_mode", "normal")).strip().lower() or "normal"
+    requires_confirmation = current_status in {"await-customer-decision", "customer-decision"} or any(
+        token in next_action.lower() for token in ("choose", "confirm", "decision required", "wait for explicit direction")
+    )
+    if requires_confirmation:
+        continuation_mode = "wait-human-approval"
+    elif mode == "autonomous":
+        continuation_mode = "auto-continue"
+    else:
+        continuation_mode = "manual-trigger-required"
+    if requires_confirmation:
+        human_hint = (
+            f"Waiting on your decision. Review the report and confirm how {next_owner or 'the orchestrator'} should proceed."
+        )
+    elif current_status in {"blocked", "review-rework", "rework", "redesign"}:
+        human_hint = (
+            f"Execution hit an issue. Ask {next_owner or 'the orchestrator'} to fix the blockers first, then rerun the current batch."
+        )
+    elif current_status == "department-review":
+        human_hint = (
+            f"Review evidence is ready. Let {next_owner or 'the next reviewer'} continue only after the current review package is confirmed complete."
+        )
+    elif continuation_mode == "auto-continue":
+        human_hint = f"No manual approval needed. {next_owner or 'The orchestrator'} can continue automatically."
+    else:
+        human_hint = f"Manual trigger needed. Ask {next_owner or 'the orchestrator'} to do the next step when you're ready."
+    summary_parts = [part for part in [f"next_owner={next_owner or 'orchestrator'}", f"next_action={next_action or 'review state and continue'}"] if part]
+    if current_phase or current_status:
+        summary_parts.append(f"stage={current_phase or current_status}/{current_status or current_phase}")
+    return {
+        "next_owner": next_owner,
+        "next_action": next_action,
+        "requires_confirmation": requires_confirmation,
+        "continuation_mode": continuation_mode,
+        "human_hint": human_hint,
+        "summary": "; ".join(summary_parts),
+    }
+
+
 def resolve_project_root(start: Path) -> Path:
     candidate = start.resolve()
     if candidate.is_file():

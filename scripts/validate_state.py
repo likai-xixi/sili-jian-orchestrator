@@ -62,6 +62,25 @@ WORKFLOW_STEP_IDS = {
         "update-state-and-handoff",
     },
 }
+FEATURE_DELIVERY_CROSS_REVIEW_STEPS = {
+    "libu2-cross-review",
+    "hubu-cross-review",
+    "gongbu-cross-review",
+    "bingbu-cross-review",
+    "libu-cross-review",
+    "xingbu-cross-review",
+    "duchayuan-cross-review",
+}
+FORMAL_DEPARTMENT_REVIEW_STEPS = {
+    "department-review",
+    "bingbu-testing",
+    "libu-documentation",
+    "xingbu-release-check",
+    "final-audit",
+    "release-prep",
+    "update-state-and-run-summary",
+}
+FORMAL_DEPARTMENT_REVIEW_ROLES = ["libu2", "hubu", "gongbu", "bingbu", "libu", "xingbu", "duchayuan"]
 
 
 def extract_markdown_value(markdown: str, label: str) -> str:
@@ -128,6 +147,13 @@ def validate(project_root: Path) -> dict:
     current_workflow = normalize(str(orchestrator.get("current_workflow", ""))) if orchestrator else ""
     current_status = normalize(str(orchestrator.get("current_status", ""))) if orchestrator else ""
     next_owner = normalize(str(orchestrator.get("next_owner", ""))) if orchestrator else ""
+    next_action = str(orchestrator.get("next_action", "")).strip() if orchestrator else ""
+    progress = orchestrator.get("workflow_progress", {}) if orchestrator else {}
+    completed_steps = {
+        normalize(str(item))
+        for item in (progress.get("completed_steps", []) if isinstance(progress, dict) else [])
+        if str(item).strip()
+    }
 
     findings: list[dict[str, str]] = []
 
@@ -173,6 +199,24 @@ def validate(project_root: Path) -> dict:
                 "code": "unknown_current_workflow",
                 "severity": "error",
                 "message": f"Current workflow '{current_workflow}' is not recognized by this repository.",
+            }
+        )
+
+    if orchestrator and not next_owner:
+        findings.append(
+            {
+                "code": "missing_next_owner",
+                "severity": "warning",
+                "message": "orchestrator-state.json does not declare next_owner.",
+            }
+        )
+
+    if orchestrator and not next_action:
+        findings.append(
+            {
+                "code": "missing_next_action",
+                "severity": "warning",
+                "message": "orchestrator-state.json does not declare next_action.",
             }
         )
 
@@ -411,6 +455,50 @@ def validate(project_root: Path) -> dict:
                 "message": "release_allowed is true while testing_allowed is false.",
             }
         )
+
+    if current_workflow == "feature-delivery":
+        active_step_ids = {
+            normalize(str(task.get("workflow_step_id", "")))
+            for task in orchestrator.get("active_tasks", [])
+            if orchestrator and str(task.get("workflow_step_id", "")).strip()
+        }
+        formal_department_review_claimed = bool(completed_steps & FORMAL_DEPARTMENT_REVIEW_STEPS)
+        needs_full_review_evidence = formal_department_review_claimed
+        if needs_full_review_evidence:
+            missing_cross_review_steps = sorted(FEATURE_DELIVERY_CROSS_REVIEW_STEPS - completed_steps)
+            matrix_text = read_text(project_root / "ai" / "reports" / "department-approval-matrix.md")
+            matrix_reviewers = [
+                line.strip()[len("## Reviewer ") :].strip()
+                for line in matrix_text.splitlines()
+                if line.strip().startswith("## Reviewer ")
+            ]
+            missing_reviewers = [role for role in FORMAL_DEPARTMENT_REVIEW_ROLES if role not in matrix_reviewers]
+            if missing_cross_review_steps:
+                findings.append(
+                    {
+                        "code": "department_review_before_cross_reviews_complete",
+                        "severity": "error",
+                        "message": "Formal department-review was claimed before all cross-review steps completed: "
+                        + ", ".join(missing_cross_review_steps),
+                    }
+                )
+            if not matrix_text.strip():
+                findings.append(
+                    {
+                        "code": "missing_department_approval_matrix",
+                        "severity": "error",
+                        "message": "Formal department-review was claimed without ai/reports/department-approval-matrix.md.",
+                    }
+                )
+            elif missing_reviewers:
+                findings.append(
+                    {
+                        "code": "incomplete_department_review_sources",
+                        "severity": "error",
+                        "message": "Formal department-review was claimed without the full six-department plus duchayuan matrix. Missing reviewers: "
+                        + ", ".join(missing_reviewers),
+                    }
+                )
 
     state_ok = not any(item["severity"] == "error" for item in findings)
     return {

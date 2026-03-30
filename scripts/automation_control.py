@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from common import read_json, read_text, require_valid_json, utc_now, write_json, write_text
+from common import next_step_guidance, read_json, read_text, require_valid_json, utc_now, write_json, write_text
 from session_registry import ensure_registry_schema
 
 
@@ -205,6 +205,7 @@ def update_tasks_for_mode(state: dict[str, Any], mode: str) -> None:
 
 
 def control_summary(project_root: Path, state: dict[str, Any], reason: str | None = None) -> dict[str, Any]:
+    guidance = next_step_guidance(state)
     return {
         "project_root": str(project_root.resolve()),
         "automation_mode": state.get("automation_mode", "normal"),
@@ -221,6 +222,10 @@ def control_summary(project_root: Path, state: dict[str, Any], reason: str | Non
         "updated_at": state.get("automation_last_changed_at"),
         "updated_by": state.get("automation_last_changed_by"),
         "reason": reason or state.get("automation_last_reason"),
+        "requires_confirmation": guidance["requires_confirmation"],
+        "continuation_mode": guidance["continuation_mode"],
+        "next_step_summary": guidance["summary"],
+        "next_step_hint": guidance["human_hint"],
     }
 
 
@@ -234,6 +239,9 @@ def render_control_markdown(payload: dict[str, Any]) -> str:
 - current_status: {payload.get('current_status', '')}
 - next_owner: {payload.get('next_owner', '')}
 - next_action: {payload.get('next_action', '')}
+- requires_confirmation: {'yes' if payload.get('requires_confirmation') else 'no'}
+- continuation_mode: {payload.get('continuation_mode', 'manual-trigger-required')}
+- next_step_hint: {payload.get('next_step_hint', '')}
 - pause_reason: {payload.get('pause_reason') or 'none'}
 - paused_at: {payload.get('paused_at') or 'n/a'}
 - paused_by: {payload.get('paused_by') or 'n/a'}

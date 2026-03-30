@@ -14,6 +14,8 @@ from orchestrator_local_steps import execute_local_step, is_local_orchestrator_s
 from resource_requirements import evaluate_runtime_constraints, task_card_resource_context
 from session_registry import ensure_registry_schema, session_reuse_decision, upsert_session
 from task_rounds import record_round_progress
+from validate_state import render_markdown as render_state_validation_markdown
+from validate_state import validate as validate_state
 from workflow_engine import WorkflowStep, ensure_workflow_progress, load_workflow, ready_steps
 
 
@@ -41,6 +43,11 @@ ROLE_TESTING = {
 
 DISPATCHED_ENVELOPE_STATUSES = {"queued", "sent"}
 ACTIVE_TASK_STATUSES = {"in-progress", "queued", "active", "waiting", "paused", "blocked", "rework", "redesign"}
+FORMAL_DEPARTMENT_REVIEW_GUARD_CODES = {
+    "department_review_before_cross_reviews_complete",
+    "missing_department_approval_matrix",
+    "incomplete_department_review_sources",
+}
 
 
 def slugify(text: str) -> str:
@@ -156,6 +163,41 @@ def pending_outbox_count(project_root: Path) -> int:
     return sum(1 for path in outbox_dir.glob("*.json") if path.is_file())
 
 
+def formal_department_review_guard(project_root: Path) -> dict[str, Any] | None:
+    report = validate_state(project_root)
+    findings = [item for item in report.get("findings", []) if item.get("code") in FORMAL_DEPARTMENT_REVIEW_GUARD_CODES]
+    if not findings:
+        return None
+    reports_dir = project_root / "ai" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "created_at": utc_now(),
+        "status": "blocked",
+        "reason": "Formal department-review evidence is incomplete.",
+        "findings": findings,
+        "state_validation": report,
+    }
+    json_path = reports_dir / "department-review-source-guard.json"
+    md_path = reports_dir / "department-review-source-guard.md"
+    write_json(json_path, payload)
+    lines = [
+        "# Department Review Source Guard",
+        "",
+        f"- created_at: {payload['created_at']}",
+        f"- status: {payload['status']}",
+        f"- reason: {payload['reason']}",
+        "",
+        "## Blocking Findings",
+        "",
+    ]
+    lines.extend(f"- `{item.get('code', 'unknown')}`: {item.get('message', '')}" for item in findings)
+    lines.extend(["", "## Full State Validation", "", render_state_validation_markdown(report).rstrip()])
+    write_text(md_path, "\n".join(lines))
+    payload["report_path"] = str(md_path.resolve())
+    payload["report_path_json"] = str(json_path.resolve())
+    return payload
+
+
 def run(project_root: Path, max_dispatch: int = 7, transport: str | None = None) -> dict:
     control = ensure_control_state(project_root)
     if control.get("automation_mode") == "paused":
@@ -174,6 +216,14 @@ def run(project_root: Path, max_dispatch: int = 7, transport: str | None = None)
             "status": "customer-decision-required",
             "message": "Customer decision is required before autonomous execution can continue.",
             "report_path": str(report_path.resolve()) if report_path.exists() else "",
+        }
+    review_guard = formal_department_review_guard(project_root)
+    if review_guard is not None:
+        return {
+            "status": "state-validation-blocked",
+            "message": review_guard["reason"],
+            "report_path": review_guard["report_path"],
+            "finding_codes": [item.get("code", "") for item in review_guard["findings"]],
         }
     resource_gate = evaluate_runtime_constraints(project_root, state)
     if resource_gate.get("status") != "ok":
