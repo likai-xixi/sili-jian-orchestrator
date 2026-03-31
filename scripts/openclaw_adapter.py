@@ -32,9 +32,27 @@ def outbox_archive_dir(project_root: Path, bucket: str) -> Path:
     return path
 
 
+def safe_filename_token(value: str, fallback: str = "item") -> str:
+    raw = str(value or "").strip()
+    token = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in raw).strip(".-_")
+    while "--" in token:
+        token = token.replace("--", "-")
+    return token or fallback
+
+
+def safe_child_json_path(base: Path, stem: str) -> Path:
+    candidate = (base.resolve() / f"{safe_filename_token(stem, fallback='dispatch')}.json").resolve()
+    try:
+        candidate.relative_to(base.resolve())
+    except ValueError as exc:
+        raise ValueError(f"dispatch path escaped outbox directory: {stem}") from exc
+    return candidate
+
+
 def persist_dispatch_envelope(project_root: Path, envelope: dict[str, Any]) -> Path:
-    dispatch_id = str(envelope["dispatch_id"])
-    path = outbox_dir(project_root) / f"{dispatch_id}.json"
+    dispatch_id = safe_filename_token(str(envelope.get("dispatch_id") or ""), fallback="dispatch")
+    envelope["dispatch_id"] = dispatch_id
+    path = safe_child_json_path(outbox_dir(project_root), dispatch_id)
     write_json(path, envelope)
     return path
 
@@ -58,6 +76,22 @@ def command_template(project_root: Path, mode: str) -> str | None:
     return value or None
 
 
+def format_dispatch_command(template: str, envelope_path: Path, envelope: dict[str, Any]) -> tuple[str | None, str | None]:
+    try:
+        return (
+            template.format(
+                payload_file=str(envelope_path),
+                dispatch_file=str(envelope_path),
+                agent_id=str(envelope.get("agent_id") or ""),
+            ),
+            None,
+        )
+    except KeyError as exc:
+        return None, f"Dispatch command template references an unknown placeholder: {exc}."
+    except Exception as exc:
+        return None, f"Dispatch command template could not be formatted: {exc}"
+
+
 def execute_dispatch_command(project_root: Path, envelope_path: Path, envelope: dict[str, Any]) -> dict[str, Any]:
     template = command_template(project_root, str(envelope.get("mode") or "spawn"))
     envelope["last_attempted_at"] = utc_now()
@@ -66,11 +100,14 @@ def execute_dispatch_command(project_root: Path, envelope_path: Path, envelope: 
         envelope.pop("sent_at", None)
         return envelope
 
-    command = template.format(
-        payload_file=str(envelope_path),
-        dispatch_file=str(envelope_path),
-        agent_id=str(envelope.get("agent_id") or ""),
-    )
+    command, format_error = format_dispatch_command(template, envelope_path, envelope)
+    if not command:
+        envelope["status"] = "failed"
+        envelope["command"] = ""
+        envelope["stderr"] = format_error or "Dispatch command template formatting failed."
+        envelope["stdout"] = ""
+        envelope.pop("sent_at", None)
+        return envelope
     completed = subprocess.run(command, capture_output=True, text=True, shell=True, check=False)
     envelope["command"] = command
     envelope["stdout"] = completed.stdout.strip()
@@ -95,7 +132,20 @@ def archive_dispatch_envelope(project_root: Path, envelope_path: Path, bucket: s
 
 
 def deliver_envelope(project_root: Path, envelope_path: Path) -> dict[str, Any]:
-    envelope = load_dispatch_envelope(envelope_path)
+    try:
+        envelope = load_dispatch_envelope(envelope_path)
+    except Exception as exc:
+        archived_path: Path | None = None
+        if envelope_path.parent == outbox_dir(project_root):
+            archived_path = archive_dispatch_envelope(project_root, envelope_path, "failed")
+        return {
+            "dispatch_id": envelope_path.stem,
+            "status": "failed",
+            "agent_id": "",
+            "error": str(exc),
+            "envelope_path": str((archived_path or envelope_path).resolve()),
+            "archived_path": str(archived_path.resolve()) if archived_path else None,
+        }
     if envelope.get("status") == "sent":
         archived_path: Path | None = None
         if envelope_path.parent == outbox_dir(project_root):
@@ -145,7 +195,9 @@ def dispatch_payload(
     task_card: Path | None = None,
     transport: str | None = None,
 ) -> dict[str, Any]:
-    dispatch_id = f"{utc_now().replace(':', '').replace('+00:00', 'Z')}-{agent_id}-{mode}-{uuid4().hex[:8]}"
+    agent_token = safe_filename_token(agent_id, fallback="agent")
+    mode_token = safe_filename_token(mode, fallback="mode")
+    dispatch_id = f"{utc_now().replace(':', '').replace('+00:00', 'Z')}-{agent_token}-{mode_token}-{uuid4().hex[:8]}"
     selected_transport = transport or os.environ.get("SILIJIAN_DISPATCH_TRANSPORT", "outbox")
     envelope = {
         "dispatch_id": dispatch_id,

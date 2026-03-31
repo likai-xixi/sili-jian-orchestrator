@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import automation_control
-from common import read_json, read_text, utc_now, write_json, write_text
+from common import read_json, read_text, require_valid_json, utc_now, write_json, write_text
 from replan_change_request import build_replan_packet
 
 
@@ -212,7 +212,7 @@ def write_change_request_report(project_root: Path, payload: dict[str, Any]) -> 
 
 def apply_change_request(project_root: Path, request: str, actor: str = "user") -> dict[str, Any]:
     state_path = project_root / "ai" / "state" / "orchestrator-state.json"
-    state = read_json(state_path)
+    state = require_valid_json(state_path, "ai/state/orchestrator-state.json") if state_path.exists() else {}
     request_id = next_change_request_id(project_root)
     action = classify_action(request)
     significance = classify_significance(request)

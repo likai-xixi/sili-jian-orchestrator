@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from common import require_valid_json, utc_now, write_json, write_text
+from common import parse_bool, require_valid_json, utc_now, write_json, write_text
 
 
 VALID_POLICIES = {"block", "mock", "skip"}
@@ -75,8 +75,9 @@ def ensure_resource_state(state: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         if categories.get(category) != normalized:
             categories[category] = normalized
             changed = True
-    if "release_requires_real_validation" not in policy:
-        policy["release_requires_real_validation"] = True
+    normalized_release_validation = parse_bool(policy.get("release_requires_real_validation", True), default=True)
+    if policy.get("release_requires_real_validation") != normalized_release_validation:
+        policy["release_requires_real_validation"] = normalized_release_validation
         changed = True
 
     gaps = state.get("resource_gaps")
@@ -210,7 +211,7 @@ def _gap_slug(resource_name: str) -> str:
 def stage_flags(state: dict[str, Any]) -> dict[str, bool]:
     current_status = str(state.get("current_status", "")).strip().lower()
     current_phase = str(state.get("current_phase", "")).strip().lower()
-    release_allowed = bool(state.get("release_allowed"))
+    release_allowed = parse_bool(state.get("release_allowed", False), default=False)
     testing_stage = current_status in {"testing", "department-review", "final-audit", "accepted", "committed", "archived"}
     release_stage = release_allowed or current_status in {"final-audit", "accepted", "committed", "archived"} or current_phase == "release"
     return {
@@ -236,7 +237,7 @@ def summary(project_root: Path, state: dict[str, Any] | None = None) -> dict[str
     payload = state or load_state(project_root)
     payload, _ = ensure_resource_state(payload)
     policy = payload.get("resource_policy") if isinstance(payload.get("resource_policy"), dict) else {}
-    release_requires_real_validation = bool(policy.get("release_requires_real_validation", True))
+    release_requires_real_validation = parse_bool(policy.get("release_requires_real_validation", True), default=True)
     gaps = [dict(gap) for gap in payload.get("resource_gaps", []) if isinstance(gap, dict)]
     blocking_open = [gap for gap in gaps if str(gap.get("policy")) == "block" and str(gap.get("status")) in OPEN_RESOURCE_STATUSES]
     deferred_validation = [gap for gap in gaps if str(gap.get("policy")) in {"mock", "skip"} and str(gap.get("status")) in OPEN_RESOURCE_STATUSES]

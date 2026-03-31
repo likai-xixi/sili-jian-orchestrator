@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from automation_control import set_mode
-from common import read_json, utc_now, write_json, write_text
+from common import read_json, require_valid_json, utc_now, write_json, write_text
 from orchestrator_local_steps import (
     FEATURE_DELIVERY_REPLAN_RESET_STEPS,
     reset_workflow_steps,
@@ -29,7 +29,8 @@ def apply_customer_decision(project_root: Path, decision: str, summary: str = ""
     if normalized not in VALID_DECISIONS:
         raise ValueError(f"Unsupported customer decision: {decision}")
 
-    state = read_json(state_path(project_root))
+    orchestrator_state_path = state_path(project_root)
+    state = require_valid_json(orchestrator_state_path, "ai/state/orchestrator-state.json") if orchestrator_state_path.exists() else {}
     sync_review_controls(project_root, state)
 
     payload = {
@@ -61,7 +62,7 @@ def apply_customer_decision(project_root: Path, decision: str, summary: str = ""
         state["cabinet_replan_triggered"] = False
     elif normalized == "pause-batch":
         set_mode(project_root, "paused", actor="customer-decision", reason=summary or "Customer requested to pause the batch.")
-        state = read_json(state_path(project_root))
+        state = require_valid_json(orchestrator_state_path, "ai/state/orchestrator-state.json") if orchestrator_state_path.exists() else {}
         state["current_phase"] = "customer-decision"
         state["current_status"] = "paused"
         state["next_owner"] = "orchestrator"
@@ -77,7 +78,7 @@ def apply_customer_decision(project_root: Path, decision: str, summary: str = ""
         state["blockers"] = []
         state["blocker_level"] = "none"
 
-    write_json(state_path(project_root), state)
+    write_json(orchestrator_state_path, state)
     sync_state_views(project_root, state)
 
     report = {

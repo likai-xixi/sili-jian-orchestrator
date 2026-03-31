@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from common import extract_field_value, read_json, read_text, text_has_placeholders
+from common import extract_field_value, parse_bool, read_json, read_text, text_has_placeholders
 
 
 WORKFLOW_STEP_IDS = {
@@ -426,9 +426,9 @@ def validate(project_root: Path) -> dict:
             }
         )
 
-    execution_allowed = bool(orchestrator.get("execution_allowed", False)) if orchestrator else False
-    testing_allowed = bool(orchestrator.get("testing_allowed", False)) if orchestrator else False
-    release_allowed = bool(orchestrator.get("release_allowed", False)) if orchestrator else False
+    execution_allowed = parse_bool(orchestrator.get("execution_allowed", False), default=False) if orchestrator else False
+    testing_allowed = parse_bool(orchestrator.get("testing_allowed", False), default=False) if orchestrator else False
+    release_allowed = parse_bool(orchestrator.get("release_allowed", False), default=False) if orchestrator else False
 
     if execution_allowed and current_status in {"draft", "planning", "department-approval"}:
         findings.append(
@@ -522,7 +522,7 @@ def validate(project_root: Path) -> dict:
     skill_violations = [
         item
         for item in latest_by_task.values()
-        if not bool(item.get("compliant", True))
+        if not parse_bool(item.get("compliant", True), default=True)
         and str(item.get("task_id") or "").strip()
         and str(item.get("task_id") or "").strip() in relevant_task_ids
     ]
@@ -539,7 +539,7 @@ def validate(project_root: Path) -> dict:
 
     if isinstance(last_completion, dict):
         schema_version = normalize(str(last_completion.get("completion_schema_version", "")))
-        if schema_version == "v1" and not bool(last_completion.get("skill_audit_recorded", False)):
+        if schema_version == "v1" and not parse_bool(last_completion.get("skill_audit_recorded", False), default=False):
             findings.append(
                 {
                     "code": "missing_skill_usage_trace",

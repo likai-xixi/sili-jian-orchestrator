@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from common import next_step_guidance, read_json, read_text, require_valid_json, utc_now, write_json, write_text
+from common import next_step_guidance, parse_bool, read_json, read_text, require_valid_json, utc_now, write_json, write_text
 from session_registry import ensure_registry_schema
 
 
@@ -91,6 +91,16 @@ def ensure_control_state(project_root: Path) -> dict[str, Any]:
                 payload[key] = value
     if payload["automation_mode"] not in VALID_AUTOMATION_MODES:
         payload["automation_mode"] = "normal"
+    payload["autonomous_auto_commit_enabled"] = parse_bool(payload.get("autonomous_auto_commit_enabled", True), default=True)
+    payload["autonomous_auto_commit_push"] = parse_bool(payload.get("autonomous_auto_commit_push", False), default=False)
+    payload["autonomous_stop_on_customer_decision"] = parse_bool(
+        payload.get("autonomous_stop_on_customer_decision", True),
+        default=True,
+    )
+    payload["window_notification_on_escalation"] = parse_bool(
+        payload.get("window_notification_on_escalation", True),
+        default=True,
+    )
     payload["conversation_mode"] = "interactive"
     payload["background_runtime_enabled"] = payload["automation_mode"] == "autonomous"
     write_json(state_path(project_root), payload)
@@ -107,9 +117,9 @@ def autonomy_settings(project_root: Path, state: dict[str, Any] | None = None) -
         "max_dispatch": max(1, int(payload.get("autonomous_max_dispatch", 7) or 7)),
         "failure_streak_limit": max(1, int(payload.get("autonomous_failure_streak_limit", 3) or 3)),
         "idle_streak_limit": max(1, int(payload.get("autonomous_idle_streak_limit", 2) or 2)),
-        "auto_commit_enabled": bool(payload.get("autonomous_auto_commit_enabled", True)),
-        "auto_commit_push": bool(payload.get("autonomous_auto_commit_push", False)),
-        "stop_on_customer_decision": bool(payload.get("autonomous_stop_on_customer_decision", True)),
+        "auto_commit_enabled": parse_bool(payload.get("autonomous_auto_commit_enabled", True), default=True),
+        "auto_commit_push": parse_bool(payload.get("autonomous_auto_commit_push", False), default=False),
+        "stop_on_customer_decision": parse_bool(payload.get("autonomous_stop_on_customer_decision", True), default=True),
         "session_rotation_policy": {
             "default": {
                 "max_completion_count": max(1, int(default_rotation.get("max_completion_count", 4) or 4)),

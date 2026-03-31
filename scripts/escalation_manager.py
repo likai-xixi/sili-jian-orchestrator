@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from common import read_json, read_text, utc_now, write_json, write_text
+from common import parse_bool, read_json, read_text, utc_now, write_json, write_text
 from resource_requirements import write_report as write_resource_gap_report
 from validate_gates import validate as validate_gates
 
@@ -332,7 +332,8 @@ def generate_escalation(project_root: Path) -> dict:
         "error": sum(1 for item in findings if item["severity"] == "error"),
         "warning": sum(1 for item in findings if item["severity"] == "warning"),
     }
-    window_notification = build_window_notification(findings, state)
+    window_notifications_enabled = parse_bool(state.get("window_notification_on_escalation", True), default=True)
+    window_notification = build_window_notification(findings, state) if window_notifications_enabled else None
     payload = {
         "created_at": utc_now(),
         "status": "escalated" if findings else "clear",

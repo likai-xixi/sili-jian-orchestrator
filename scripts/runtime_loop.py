@@ -17,7 +17,7 @@ import resource_requirements
 import runtime_environment
 import run_orchestrator
 import task_rounds
-from common import utc_now, write_json, write_text
+from common import parse_bool, utc_now, write_json, write_text
 from openclaw_adapter import deliver_outbox
 
 
@@ -155,8 +155,8 @@ def collect_window_notifications(summary: dict) -> list[dict]:
     return deduped
 
 
-def persist_window_notifications(project_root: Path, summary: dict) -> None:
-    notifications = collect_window_notifications(summary)
+def persist_window_notifications(project_root: Path, summary: dict, *, enabled: bool = True) -> None:
+    notifications = collect_window_notifications(summary) if enabled else []
     summary["window_notifications"] = notifications
     summary["window_notification_required"] = bool(notifications)
     summary["latest_window_notification"] = notifications[-1] if notifications else None
@@ -214,6 +214,7 @@ def run_loop(
         )
         control = automation_control.ensure_control_state(project_root)
 
+    window_notice_enabled = parse_bool(control.get("window_notification_on_escalation", True), default=True)
     mode = str(control.get("automation_mode", "normal"))
     autonomy = automation_control.autonomy_settings(project_root, control)
     resolved_max_cycles = max_cycles if max_cycles is not None else autonomy["max_cycles"]
@@ -244,7 +245,7 @@ def run_loop(
             "environment": {"status": "skipped-control-check"},
             "message": "Autonomous runtime is not active. Switch to automation_mode=autonomous before entering the loop.",
         }
-        persist_window_notifications(project_root, summary)
+        persist_window_notifications(project_root, summary, enabled=window_notice_enabled)
         reports_dir = project_root / "ai" / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         write_json(reports_dir / "runtime-loop-summary.json", summary)
@@ -278,7 +279,7 @@ def run_loop(
             "cycles": [],
             "message": "Project dependency bootstrap failed. Fix environment-bootstrap blockers before entering the runtime loop.",
         }
-        persist_window_notifications(project_root, summary)
+        persist_window_notifications(project_root, summary, enabled=window_notice_enabled)
         reports_dir = project_root / "ai" / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         write_json(reports_dir / "runtime-loop-summary.json", summary)
@@ -314,7 +315,7 @@ def run_loop(
             "rollover_report": str((project_root / "ai" / "reports" / "orchestrator-rollover.md").resolve()),
             "message": rollover_payload.get("rollover_reason", "Context budget threshold reached."),
         }
-        persist_window_notifications(project_root, summary)
+        persist_window_notifications(project_root, summary, enabled=window_notice_enabled)
         reports_dir = project_root / "ai" / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         write_json(reports_dir / "runtime-loop-summary.json", summary)
@@ -352,7 +353,7 @@ def run_loop(
             "decision_freeze": freeze,
             "message": resource_gate.get("message", ""),
         }
-        persist_window_notifications(project_root, summary)
+        persist_window_notifications(project_root, summary, enabled=window_notice_enabled)
         reports_dir = project_root / "ai" / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         write_json(reports_dir / "runtime-loop-summary.json", summary)
@@ -586,7 +587,7 @@ def run_loop(
     if rollover_payload:
         summary["rollover_report"] = str((project_root / "ai" / "reports" / "orchestrator-rollover.md").resolve())
         summary["message"] = rollover_payload.get("rollover_reason", "Context budget threshold reached.")
-    persist_window_notifications(project_root, summary)
+    persist_window_notifications(project_root, summary, enabled=window_notice_enabled)
     reports_dir = project_root / "ai" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     write_json(reports_dir / "runtime-loop-summary.json", summary)

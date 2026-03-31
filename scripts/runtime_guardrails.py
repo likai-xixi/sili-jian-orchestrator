@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from common import read_text, utc_now, write_json, write_text
+from common import read_json, read_text, utc_now, write_json, write_text
 
 
 def _env_int(name: str, default: int) -> int:
@@ -36,7 +36,16 @@ def session_dispatch_limit() -> int:
     return _env_int("SILIJIAN_SESSION_DISPATCH_LIMIT", 6)
 
 
-def invalid_completion_fuse_threshold() -> int:
+def invalid_completion_fuse_threshold(project_root: Path | None = None) -> int:
+    if project_root is not None:
+        state = read_json(project_root / "ai" / "state" / "orchestrator-state.json")
+        configured = state.get("skill_violation_fuse_threshold")
+        try:
+            configured_value = int(configured)
+        except (TypeError, ValueError):
+            configured_value = 0
+        if configured_value > 0:
+            return configured_value
     return _env_int("SILIJIAN_INVALID_COMPLETION_FUSE_THRESHOLD", 2)
 
 

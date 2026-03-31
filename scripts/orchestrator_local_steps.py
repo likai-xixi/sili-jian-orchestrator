@@ -12,6 +12,7 @@ from common import (
     next_step_guidance,
     read_json,
     read_text,
+    require_valid_json,
     utc_now,
     write_json,
     write_text,
@@ -1055,7 +1056,7 @@ def build_department_matrix(project_root: Path, state: dict[str, Any], step_id: 
 
 def apply_post_completion_state(project_root: Path, step: WorkflowStep) -> None:
     path = state_path(project_root)
-    state = read_json(path)
+    state = require_valid_json(path, "ai/state/orchestrator-state.json") if path.exists() else {}
     sync_review_controls(project_root, state)
     workflow = str(state.get("current_workflow", ""))
     if step.id == "identify-project":
@@ -1153,7 +1154,8 @@ def apply_post_completion_state(project_root: Path, step: WorkflowStep) -> None:
 
 def execute_local_step(project_root: Path, step: WorkflowStep, task_id: str) -> dict[str, Any]:
     ensure_governance_surface(project_root)
-    state = read_json(state_path(project_root))
+    resolved_state_path = state_path(project_root)
+    state = require_valid_json(resolved_state_path, "ai/state/orchestrator-state.json") if resolved_state_path.exists() else {}
     step_summary = f"Locally executed orchestrator step `{step.id}`."
     if step.id == "identify-project":
         info = write_project_identity(project_root, state)
@@ -1164,7 +1166,7 @@ def execute_local_step(project_root: Path, step: WorkflowStep, task_id: str) -> 
                 "primary_goal": state.get("primary_goal", "Establish governed project structure and freeze the initial plan."),
             }
         )
-        write_json(state_path(project_root), state)
+        write_json(resolved_state_path, state)
         sync_state_views(project_root, state)
         step_summary = f"Inspected the project and refreshed project-meta for `{info.get('project_id', project_root.name)}`."
     elif step.id in {"bootstrap-governance", "backfill-governance"}:
@@ -1174,7 +1176,7 @@ def execute_local_step(project_root: Path, step: WorkflowStep, task_id: str) -> 
     elif step.id == "create-run-snapshot":
         run_id = create_snapshot(project_root, step.id)
         state["current_run_id"] = run_id
-        write_json(state_path(project_root), state)
+        write_json(resolved_state_path, state)
         step_summary = f"Created run snapshot `{run_id}`."
     elif step.id == "inspect-governance":
         build_current_implementation_summary(project_root)
@@ -1227,7 +1229,7 @@ def execute_local_step(project_root: Path, step: WorkflowStep, task_id: str) -> 
         allow_untracked_completion=True,
     )
     apply_post_completion_state(project_root, step)
-    updated_state = read_json(state_path(project_root))
+    updated_state = require_valid_json(resolved_state_path, "ai/state/orchestrator-state.json") if resolved_state_path.exists() else {}
     guidance = next_step_guidance(updated_state)
     return {
         "task_id": task_id,

@@ -8,6 +8,7 @@ import automation_control
 import change_request_control
 import close_session
 import runtime_loop
+from common import read_json
 from common import HANDOFF_DIRS
 
 
@@ -101,7 +102,7 @@ def execute_request(
         notice_path = project_root / "ai" / "reports" / "openclaw-window-notifications.json"
         if not notice_path.exists():
             return
-        data = json.loads(notice_path.read_text(encoding="utf-8"))
+        data = read_json(notice_path)
         notifications = data.get("notifications", []) if isinstance(data.get("notifications"), list) else []
         target["window_notification"] = notifications[-1] if notifications else None
 

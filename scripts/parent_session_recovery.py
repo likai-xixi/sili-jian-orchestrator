@@ -62,6 +62,21 @@ def automatic_reattach_recommended(payload: dict) -> bool:
     return bool(session_key) and str(payload.get("automation_mode", "normal")) in {"autonomous", "paused"}
 
 
+def format_parent_attach_command(template: str, reattach_path: Path, reattach_payload: dict) -> tuple[str | None, str | None]:
+    try:
+        return (
+            template.format(
+                payload_file=str(reattach_path),
+                session_key=reattach_payload.get("session_key", ""),
+            ),
+            None,
+        )
+    except KeyError as exc:
+        return None, f"Parent-attach command template references an unknown placeholder: {exc}."
+    except Exception as exc:
+        return None, f"Parent-attach command template could not be formatted: {exc}"
+
+
 def attempt_reattach(project_root: Path, payload: dict) -> dict:
     reattach_path = persist_reattach_payload(project_root, payload)
     reattach_payload = build_reattach_payload(project_root, payload)
@@ -84,7 +99,11 @@ def attempt_reattach(project_root: Path, payload: dict) -> dict:
     if not template:
         result["blocked_reason"] = "No parent attach command is available after runtime environment setup."
         return result
-    command = template.format(payload_file=str(reattach_path), session_key=reattach_payload.get("session_key", ""))
+    command, format_error = format_parent_attach_command(template, reattach_path, reattach_payload)
+    if not command:
+        result["status"] = "attach-failed"
+        result["blocked_reason"] = format_error or "Parent-attach command template formatting failed."
+        return result
     completed = subprocess.run(command, capture_output=True, text=True, shell=True, check=False)
     result["command"] = command
     result["stdout"] = completed.stdout.strip()

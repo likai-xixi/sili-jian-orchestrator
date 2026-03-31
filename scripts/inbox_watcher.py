@@ -68,7 +68,7 @@ def guard_invalid_completion(project_root: Path, payload: dict, error: str) -> d
     registry = ensure_registry_schema(project_root)
     record = dict(registry.get(agent_id, {}))
     invalid_count = int(record.get("consecutive_invalid_completions") or 0) + 1
-    threshold = invalid_completion_fuse_threshold()
+    threshold = invalid_completion_fuse_threshold(project_root)
     fused = invalid_count >= threshold
     reason = f"Invalid completion from {agent_id}: {error}"
 

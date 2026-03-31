@@ -4,12 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
-from common import read_json, utc_now, write_json
+from common import read_json, require_valid_json, utc_now, write_json
 from orchestrator_local_steps import review_controls_path, sync_review_controls, sync_state_views, state_path
 
 
 def configure(project_root: Path, before_cabinet: int | None = None, after_cabinet: int | None = None) -> dict:
-    state = read_json(state_path(project_root))
+    orchestrator_state_path = state_path(project_root)
+    state = require_valid_json(orchestrator_state_path, "ai/state/orchestrator-state.json") if orchestrator_state_path.exists() else {}
     sync_review_controls(project_root, state)
 
     payload = read_json(review_controls_path(project_root))
@@ -23,7 +24,7 @@ def configure(project_root: Path, before_cabinet: int | None = None, after_cabin
     write_json(review_controls_path(project_root), payload)
 
     sync_review_controls(project_root, state)
-    write_json(state_path(project_root), state)
+    write_json(orchestrator_state_path, state)
     sync_state_views(project_root, state)
     return payload
 

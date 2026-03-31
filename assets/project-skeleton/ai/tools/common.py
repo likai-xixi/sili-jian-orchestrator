@@ -64,6 +64,8 @@ HANDOFF_DIRS = [
 PASS_CONCLUSIONS = {"PASS", "PASS_WITH_WARNING", "YES", "APPROVED", "ALLOW"}
 POSITIVE_GATE_VALUES = {"yes", "approved", "confirm", "confirmed", "pass", "pass-with-warning", "allow", "true", "done"}
 NOT_APPLICABLE_GATE_VALUES = {"n-a", "n/a", "na", "not-applicable", "not applicable"}
+TRUE_VALUES = {"1", "true", "yes", "y", "on"}
+FALSE_VALUES = {"0", "false", "no", "n", "off", ""}
 
 
 def utc_now() -> str:
@@ -81,6 +83,23 @@ def read_json(path: Path) -> dict[str, Any]:
         return json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError:
         return {}
+
+
+def parse_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in TRUE_VALUES:
+            return True
+        if normalized in FALSE_VALUES:
+            return False
+        return default
+    if value is None:
+        return default
+    return bool(value)
 
 
 def read_json_with_status(path: Path) -> tuple[dict[str, Any], str, str | None]:
@@ -494,9 +513,9 @@ def inspect_project(project_root: Path, intent: str = "auto") -> dict[str, Any]:
     final_audit = extract_conclusion(acceptance_text, "Final Conclusion")
     test_recommendation = extract_conclusion(test_text, "Recommendation")
 
-    execution_allowed = bool(orchestrator_state.get("execution_allowed", False))
-    testing_allowed = bool(orchestrator_state.get("testing_allowed", False))
-    release_allowed = bool(orchestrator_state.get("release_allowed", False))
+    execution_allowed = parse_bool(orchestrator_state.get("execution_allowed", False), default=False)
+    testing_allowed = parse_bool(orchestrator_state.get("testing_allowed", False), default=False)
+    release_allowed = parse_bool(orchestrator_state.get("release_allowed", False), default=False)
     scenario = scenario_from_intent(intent, project_root)
     implementation_baseline_required = scenario == "mid-stream-takeover" and project_has_existing_context(project_root)
     implementation_summary_ready = (not implementation_baseline_required) or (

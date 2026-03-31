@@ -173,8 +173,8 @@ def collect_evidence(project_root: Path, force: bool = False) -> dict:
         release_status,
         rollback_status,
     )
-    release_recommendation = "YES" if recommendation in {"PASS", "PASS_WITH_WARNING"} else "NO"
     mainline_result = "YES" if test_status == "PASS" else "NO"
+    release_recommendation = "YES" if recommendation in {"PASS", "PASS_WITH_WARNING"} and mainline_result == "YES" else "NO"
 
     test_report = f"""# Test Report
 

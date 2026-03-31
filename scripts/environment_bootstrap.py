@@ -103,7 +103,8 @@ def missing_system_tools(project_root: Path) -> list[str]:
     missing: list[str] = []
     for tool in required_system_tools(project_root):
         if tool == "python":
-            if not shutil.which(Path(sys.executable).name):
+            python_executable = Path(sys.executable)
+            if not python_executable.exists() and not shutil.which("python") and not shutil.which(python_executable.name):
                 missing.append(tool)
             continue
         if not executable_available(tool):

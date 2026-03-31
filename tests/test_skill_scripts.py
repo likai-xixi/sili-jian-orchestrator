@@ -1171,6 +1171,34 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(status["intent"], "status")
             self.assertEqual(status["control"]["automation_mode"], "paused")
 
+    def test_natural_language_control_status_tolerates_invalid_window_notice_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            bootstrap = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS_DIR / "bootstrap_governance.py"),
+                    str(project_root),
+                    "--project-name",
+                    "demo",
+                    "--project-id",
+                    "demo",
+                    "--skill-root",
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(bootstrap.returncode, 0, bootstrap.stderr)
+            (project_root / "ai" / "reports" / "openclaw-window-notifications.json").write_text("{bad\n", encoding="utf-8")
+
+            status = natural_language_control.execute_request(project_root, "status", actor="user")
+
+            self.assertEqual(status["intent"], "status")
+            self.assertIn("control", status)
+            self.assertIsNone(status.get("window_notification"))
+
     def test_natural_language_control_routes_change_request_with_fixed_prefix(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -1256,6 +1284,24 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             control = automation_control.current_status(project_root)
             self.assertEqual(control["automation_mode"], "paused")
 
+    def test_change_request_control_preserves_invalid_state_before_applying_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            invalid_state = "{invalid json\n"
+            (state_dir / "orchestrator-state.json").write_text(invalid_state, encoding="utf-8")
+            (state_dir / "requirements-pool.md").write_text("# Requirements Pool\n\n## Raw\n\n- none\n", encoding="utf-8")
+            (state_dir / "task-tree.json").write_text(json.dumps({}, indent=2) + "\n", encoding="utf-8")
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n\n## Notes For Next Round\n\n- none\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                change_request_control.apply_change_request(project_root, "add login button", actor="user")
+
+            backups = list(state_dir.glob("orchestrator-state.json.corrupt-*.bak"))
+            self.assertTrue(backups)
+            self.assertEqual((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"), invalid_state)
+
     def test_configure_autonomy_updates_defaults_and_agent_rotation(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -1310,6 +1356,35 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(payload["max_cycles"], 999)
             self.assertEqual(state["autonomous_max_dispatch"], 7)
             self.assertEqual(payload["max_dispatch"], 7)
+
+    def test_autonomy_settings_parses_string_booleans(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "automation_mode": "autonomous",
+                        "autonomous_auto_commit_enabled": "false",
+                        "autonomous_auto_commit_push": "false",
+                        "autonomous_stop_on_customer_decision": "false",
+                        "window_notification_on_escalation": "false",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            state = automation_control.ensure_control_state(project_root)
+            payload = automation_control.autonomy_settings(project_root, state)
+
+            self.assertFalse(payload["auto_commit_enabled"])
+            self.assertFalse(payload["auto_commit_push"])
+            self.assertFalse(payload["stop_on_customer_decision"])
+            self.assertFalse(state["window_notification_on_escalation"])
 
     def test_session_registry_honors_per_agent_rotation_policy(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1607,6 +1682,49 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(closed["gap"]["status"], "closed")
             self.assertEqual(closed["gap"]["retest_status"], "passed")
 
+    def test_resource_gap_summary_parses_string_boolean_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "release",
+                        "current_status": "planning",
+                        "release_allowed": "false",
+                        "resource_policy": {
+                            "default_policy": "mock",
+                            "categories": {"other": "mock"},
+                            "release_requires_real_validation": "false",
+                        },
+                        "resource_gaps": [
+                            {
+                                "gap_id": "gap-1",
+                                "resource_name": "partner-api",
+                                "category": "other",
+                                "policy": "mock",
+                                "status": "deferred",
+                                "due_stage": "release",
+                                "scope_level": "project",
+                                "scope_label": "",
+                                "real_validation_required": True,
+                            }
+                        ],
+                        "resource_gap_history": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = resource_requirements.summary(project_root)
+
+            self.assertFalse(report["requires_user_input"])
+            self.assertEqual(report["release_validation_pending"], [])
+
     def test_runtime_loop_auto_commits_after_completed_task_round(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -1862,6 +1980,68 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertIn("司礼监告警", summary["latest_window_notification"]["title"])
             self.assertTrue((project_root / "ai" / "reports" / "openclaw-window-notifications.json").exists())
 
+    def test_runtime_loop_can_disable_window_notifications(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "automation_mode": "normal",
+                        "window_notification_on_escalation": False,
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "draft",
+                        "current_status": "draft",
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            summary = runtime_loop.run_loop(project_root, max_cycles=1, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(summary["status"], "control-blocked")
+            self.assertFalse(summary["window_notification_required"])
+            self.assertEqual(summary["window_notifications"], [])
+            notice = json.loads((project_root / "ai" / "reports" / "openclaw-window-notifications.json").read_text(encoding="utf-8"))
+            self.assertEqual(notice["notifications"], [])
+
+    def test_runtime_loop_can_disable_window_notifications_from_string_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "automation_mode": "normal",
+                        "window_notification_on_escalation": "false",
+                        "current_workflow": "feature-delivery",
+                        "current_phase": "draft",
+                        "current_status": "draft",
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            summary = runtime_loop.run_loop(project_root, max_cycles=1, max_dispatch=1, transport="outbox")
+
+            self.assertEqual(summary["status"], "control-blocked")
+            self.assertFalse(summary["window_notification_required"])
+            self.assertEqual(summary["window_notifications"], [])
+            notice = json.loads((project_root / "ai" / "reports" / "openclaw-window-notifications.json").read_text(encoding="utf-8"))
+            self.assertEqual(notice["notifications"], [])
+
     def test_git_autocommit_only_commits_current_round_related_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -1955,6 +2135,31 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             self.assertEqual(len(sent_items), 1)
             inbox_items = list((project_root / "ai" / "runtime" / "inbox").glob("*.json"))
             self.assertEqual(len(inbox_items), 1)
+
+    def test_openclaw_adapter_skips_corrupt_outbox_envelope_and_continues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            helper = Path(tmp) / "transport_helper.py"
+            project_root.mkdir(parents=True)
+            write_transport_helper(helper)
+
+            openclaw_adapter.dispatch_payload(
+                project_root,
+                {"task": "[libu2 task]\\n- task_id: LIBU2-2\\n- workflow_step_id: libu2-implementation\\n"},
+                "spawn",
+                "libu2",
+                transport="outbox",
+            )
+            (project_root / "ai" / "runtime" / "outbox" / "bad-envelope.json").write_text("{bad\n", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"OPENCLAW_SPAWN_COMMAND": f'"{sys.executable}" "{helper}" "{{dispatch_file}}"'}):
+                result = openclaw_adapter.deliver_outbox(project_root)
+
+            self.assertEqual(result["attempted_count"], 2)
+            self.assertEqual(result["sent_count"], 1)
+            self.assertEqual(result["failed_count"], 1)
+            self.assertTrue((project_root / "ai" / "runtime" / "outbox" / "failed" / "bad-envelope.json").exists())
+            self.assertEqual(len(list((project_root / "ai" / "runtime" / "outbox" / "sent").glob("*.json"))), 1)
 
     def test_repo_command_detector_prefers_package_scripts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2272,6 +2477,8 @@ class GovernanceScriptRegressionTests(unittest.TestCase):
             summary = evidence_collector.collect_evidence(project_root, force=True)
 
             self.assertEqual(summary["test"]["status"], "SKIPPED")
+            self.assertEqual(summary["mainline_result"], "NO")
+            self.assertEqual(summary["release_recommendation"], "NO")
             report = (reports_dir / "test-report.md").read_text(encoding="utf-8")
             self.assertIn("- passed: 0", report)
             self.assertIn("- failed: 0", report)
@@ -2578,6 +2785,38 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertEqual(audit["totals"]["violations"], 1)
             self.assertEqual(len(audit["items"]), 1)
             self.assertEqual(audit["items"][-1]["violation_code"], "skill_policy_violation")
+
+    def test_inbox_watcher_honors_state_skill_violation_fuse_threshold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "automation_mode": "autonomous",
+                        "skill_violation_fuse_threshold": 1,
+                        "current_workflow": "feature-delivery",
+                        "current_status": "executing",
+                        "active_tasks": [],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text("{}\n", encoding="utf-8")
+
+            payload = inbox_watcher.guard_invalid_completion(project_root, {"agent_id": "libu2"}, "protocol violation")
+
+            self.assertIsNotNone(payload)
+            self.assertEqual(payload["fuse_threshold"], 1)
+            self.assertTrue(payload["fused"])
+            registry = json.loads((state_dir / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["libu2"]["status"], "closed")
+            self.assertTrue(registry["libu2"]["rebuild_required"])
 
     def test_completion_consumer_marks_step_complete_and_updates_session(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3086,6 +3325,34 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertIn("high-risk change noted in risk report", joined)
             self.assertGreaterEqual(payload["severity_counts"]["error"], 2)
 
+    def test_escalation_manager_can_disable_window_notifications_from_string_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_status": "blocked",
+                        "window_notification_on_escalation": "false",
+                        "next_owner": "orchestrator",
+                        "blockers": ["ci failing"],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            payload = escalation_manager.generate_escalation(project_root)
+            self.assertEqual(payload["status"], "escalated")
+            self.assertFalse(payload["window_notification_required"])
+            self.assertIsNone(payload["window_notification"])
+
     def test_parent_session_recovery_builds_resume_prompt(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -3322,6 +3589,28 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             inbox_items = list((project_root / "ai" / "runtime" / "inbox").glob("*.json"))
             self.assertEqual(len(inbox_items), 1)
 
+    def test_openclaw_adapter_marks_failed_for_invalid_command_template(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            runtime_dir = project_root / "ai" / "runtime"
+            runtime_dir.mkdir(parents=True)
+            (runtime_dir / "runtime-config.json").write_text(
+                json.dumps({"spawn_command": "echo {missing_placeholder}"}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(os.environ, {"OPENCLAW_SPAWN_COMMAND": ""}, clear=False):
+                envelope = openclaw_adapter.dispatch_payload(
+                    project_root,
+                    {"task": "demo"},
+                    "spawn",
+                    "libu2",
+                    transport="command",
+                )
+
+            self.assertEqual(envelope["status"], "failed")
+            self.assertIn("unknown placeholder", str(envelope.get("stderr") or "").lower())
+
     def test_openclaw_adapter_generates_unique_dispatch_ids_for_same_agent_same_second(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
@@ -3332,6 +3621,26 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertNotEqual(first["dispatch_id"], second["dispatch_id"])
             outbox_items = list((project_root / "ai" / "runtime" / "outbox").glob("*.json"))
             self.assertEqual(len(outbox_items), 2)
+
+    def test_openclaw_adapter_sanitizes_dispatch_path_for_agent_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            project_root.mkdir(parents=True)
+
+            envelope = openclaw_adapter.dispatch_payload(
+                project_root,
+                {"task": "demo"},
+                "spawn",
+                "..\\..\\..\\evil",
+                transport="outbox",
+            )
+
+            self.assertNotIn("..", envelope["dispatch_id"])
+            outbox = (project_root / "ai" / "runtime" / "outbox").resolve()
+            outbox_items = list(outbox.glob("*.json"))
+            self.assertEqual(len(outbox_items), 1)
+            self.assertEqual(outbox_items[0].stem, envelope["dispatch_id"])
+            outbox_items[0].resolve().relative_to(outbox)
 
     def test_session_registry_reuses_only_same_workflow(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3492,6 +3801,17 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             gh_entry = next(item for item in payload["system_tool_actions"] if item["tool"] == "gh")
             self.assertEqual(gh_entry["status"], "blocked")
             self.assertIn("No install command configured", gh_entry["blocked_reason"])
+
+    def test_environment_bootstrap_does_not_flag_python_when_sys_executable_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            project_root.mkdir(parents=True, exist_ok=True)
+
+            with mock.patch("environment_bootstrap.required_system_tools", return_value=["python"]):
+                with mock.patch("environment_bootstrap.shutil.which", return_value=None):
+                    missing = environment_bootstrap.missing_system_tools(project_root)
+
+            self.assertEqual(missing, [])
 
     def test_environment_bootstrap_reuses_cached_dependency_results(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3665,6 +3985,33 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertEqual(first["reattach_status"], "attached")
             self.assertEqual(second["reattach_status"], "attached")
             self.assertIn("duplicate attach attempt", second["reattach_attempt"]["blocked_reason"])
+
+    def test_parent_session_recovery_marks_attach_failed_for_invalid_command_template(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"current_workflow": "feature-delivery", "current_status": "department-review", "automation_mode": "autonomous"}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"orchestrator": {"session_key": "sess-bad-template", "last_step_id": "department-review"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "runtime-loop-summary.json").write_text(json.dumps({"status": "active"}, indent=2) + "\n", encoding="utf-8")
+            (reports_dir / "escalation-report.json").write_text(json.dumps({"status": "clear", "items": []}, indent=2) + "\n", encoding="utf-8")
+
+            payload = parent_session_recovery.build_parent_recovery(project_root)
+            with mock.patch.dict(os.environ, {"OPENCLAW_PARENT_ATTACH_COMMAND": "echo {missing_placeholder}"}):
+                result = parent_session_recovery.write_recovery_artifacts(project_root, payload, auto_reattach=True, force_reattach=True)
+
+            self.assertEqual(result["reattach_status"], "attach-failed")
+            self.assertIn("unknown placeholder", str(result["reattach_blocked_reason"]).lower())
 
     def test_openclaw_runtime_bridge_tries_parent_attach_cli_variants(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3840,6 +4187,74 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertEqual(registry["libu2"]["session_key"], "sess-close")
             state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["active_tasks"][0]["status"], "in-progress")
+
+    def test_close_session_marks_failed_for_invalid_command_template(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            runtime_dir = project_root / "ai" / "runtime"
+            state_dir.mkdir(parents=True)
+            runtime_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_workflow": "feature-delivery",
+                        "current_status": "executing",
+                        "active_tasks": [{"task_id": "LIBU2-1", "role": "libu2", "status": "in-progress"}],
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({"libu2": {"agent_id": "libu2", "session_key": "sess-close", "status": "active"}}, indent=2)
+                + "\n",
+                encoding="utf-8",
+            )
+            (runtime_dir / "runtime-config.json").write_text(
+                json.dumps({"close_session_command": "echo {missing_placeholder}"}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            payload = close_session.apply_close(project_root, "libu2", "Close for handoff consolidation.", force_native=True)
+
+            self.assertFalse(payload["retired"])
+            self.assertEqual(payload["native_close_status"], "close-failed")
+            self.assertIn("unknown placeholder", str(payload.get("native_close_blocked_reason") or "").lower())
+            registry = json.loads((state_dir / "agent-sessions.json").read_text(encoding="utf-8"))
+            self.assertEqual(registry["libu2"]["status"], "active")
+
+    def test_close_session_sanitizes_artifact_paths_for_agent_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            state_dir.mkdir(parents=True)
+
+            agent_id = "..\\..\\escape/agent"
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"active_tasks": []}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "agent-sessions.json").write_text(
+                json.dumps({agent_id: {"agent_id": agent_id, "session_key": None, "status": "idle"}}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            payload = close_session.apply_close(project_root, agent_id, "Close for path traversal protection.")
+
+            payload_path = Path(payload["payload_path"]).resolve()
+            reattach_base = (project_root / "ai" / "runtime" / "reattach").resolve()
+            self.assertEqual(payload["native_close_status"], "logical-only")
+            self.assertNotIn("..", payload_path.name)
+            self.assertTrue(payload_path.exists())
+            payload_path.relative_to(reattach_base)
+
+            token = close_session.safe_filename_token(agent_id)
+            report_json = (project_root / "ai" / "reports" / f"session-close-{token}.json").resolve()
+            self.assertTrue(report_json.exists())
+            report_json.relative_to((project_root / "ai" / "reports").resolve())
 
     def test_natural_language_control_routes_close_session_request(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -4133,6 +4548,19 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertTrue(approved_report["customer_acknowledged_implementation"])
             self.assertTrue(approved_report["customer_confirmed_requirement"])
             self.assertTrue(approved_report["development_approved"])
+
+            state_path = state_dir / "orchestrator-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["current_status"] = "executing"
+            state["execution_allowed"] = "false"
+            state["testing_allowed"] = "false"
+            state["release_allowed"] = "false"
+            state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+            string_flag_report = inspect_project(project_root, intent="mid-stream-takeover")
+            self.assertFalse(string_flag_report["execution_ready"])
+            self.assertFalse(string_flag_report["testing_ready"])
+            self.assertFalse(string_flag_report["release_allowed"])
 
     def test_update_state_and_handoff_waits_for_customer_confirmation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -4517,6 +4945,77 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             report = validate_state.validate(project_root)
             codes = {item["code"] for item in report["findings"]}
             self.assertIn("skill_policy_violation", codes)
+            self.assertFalse(report["state_consistent"])
+
+    def test_validate_state_parses_string_booleans_for_runtime_and_skill_audit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "draft",
+                        "current_status": "draft",
+                        "current_workflow": "feature-delivery",
+                        "next_owner": "orchestrator",
+                        "next_action": "review completion",
+                        "execution_allowed": "false",
+                        "testing_allowed": "false",
+                        "release_allowed": "false",
+                        "active_tasks": [],
+                        "last_completion": {
+                            "task_id": "LIBU2-1",
+                            "workflow_step_id": "libu2-implementation",
+                            "completion_schema_version": "v1",
+                            "skill_audit_recorded": "false",
+                        },
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "START_HERE.md").write_text(
+                "# Start Here\n\n- Stage: draft\n- Workflow: feature-delivery\n- Next owner: orchestrator\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text(
+                "# Project Handoff\n\n- Status: draft\n- Current phase: draft\n- Current workflow: feature-delivery\n- Next owner: orchestrator\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "agent-skill-usage.json").write_text(
+                json.dumps(
+                    {
+                        "updated_at": "2026-01-01T00:00:00+00:00",
+                        "schema_version": "v1",
+                        "items": [
+                            {
+                                "task_id": "LIBU2-1",
+                                "agent_id": "libu2",
+                                "compliant": "false",
+                                "violation_code": "skill_policy_violation",
+                                "violation_reason": "skill_policy=required but execution_trace.skills_used is empty.",
+                            }
+                        ],
+                        "totals": {"total": 1, "compliant": 0, "violations": 1},
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report = validate_state.validate(project_root)
+            codes = {item["code"] for item in report["findings"]}
+            self.assertNotIn("execution_allowed_too_early", codes)
+            self.assertIn("skill_policy_violation", codes)
+            self.assertIn("missing_skill_usage_trace", codes)
             self.assertFalse(report["state_consistent"])
 
     def test_validate_state_ignores_historical_skill_violations_outside_active_context(self):

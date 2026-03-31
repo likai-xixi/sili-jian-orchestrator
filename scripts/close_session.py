@@ -6,7 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from common import read_json, read_text, utc_now, write_json, write_text
+from common import read_json, read_text, require_valid_json, utc_now, write_json, write_text
 from runtime_environment import ensure_runtime_environment
 from session_registry import ensure_registry_schema
 
@@ -21,6 +21,14 @@ def reattach_dir(project_root: Path) -> Path:
     path = project_root / "ai" / "runtime" / "reattach"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def safe_filename_token(value: str, fallback: str = "agent") -> str:
+    raw = str(value or "").strip()
+    token = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in raw).strip(".-_")
+    while "--" in token:
+        token = token.replace("--", "-")
+    return token or fallback
 
 
 def runtime_config(project_root: Path) -> dict:
@@ -75,15 +83,22 @@ def build_close_payload(project_root: Path, agent_id: str, reason: str) -> dict:
 
 
 def close_payload_path(project_root: Path, agent_id: str) -> Path:
-    return reattach_dir(project_root) / f"{agent_id}-close-session.json"
+    base = reattach_dir(project_root).resolve()
+    candidate = (base / f"{safe_filename_token(agent_id)}-close-session.json").resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"close payload path escapes reattach dir for agent `{agent_id}`") from exc
+    return candidate
 
 
 def write_close_artifacts(project_root: Path, payload: dict) -> dict:
-    path = close_payload_path(project_root, str(payload.get("agent_id") or "agent"))
+    agent_token = safe_filename_token(str(payload.get("agent_id") or "agent"))
+    path = close_payload_path(project_root, agent_token)
     write_json(path, payload)
     report_base = reports_dir(project_root)
-    write_json(report_base / f"session-close-{payload['agent_id']}.json", payload)
-    write_text(report_base / f"session-close-{payload['agent_id']}.md", render_close_markdown(payload))
+    write_json(report_base / f"session-close-{agent_token}.json", payload)
+    write_text(report_base / f"session-close-{agent_token}.md", render_close_markdown(payload))
     payload["payload_path"] = str(path.resolve())
     return payload
 
@@ -98,6 +113,22 @@ def render_close_markdown(payload: dict) -> str:
 - native_close_command_source: {payload.get('native_close_command_source', 'missing')}
 - native_close_blocked_reason: {payload.get('native_close_blocked_reason') or 'none'}
 """
+
+
+def format_close_command(template: str, path: Path, payload: dict) -> tuple[str | None, str | None]:
+    try:
+        return (
+            template.format(
+                payload_file=str(path),
+                session_key=str(payload.get("session_key") or ""),
+                agent_id=str(payload.get("agent_id") or ""),
+            ),
+            None,
+        )
+    except KeyError as exc:
+        return None, f"Close-session command template references an unknown placeholder: {exc}."
+    except Exception as exc:
+        return None, f"Close-session command template could not be formatted: {exc}"
 
 
 def attempt_native_close(project_root: Path, payload: dict) -> dict:
@@ -119,11 +150,11 @@ def attempt_native_close(project_root: Path, payload: dict) -> dict:
     if not template:
         result["blocked_reason"] = "No close-session command is configured."
         return result
-    command = template.format(
-        payload_file=str(path),
-        session_key=str(payload.get("session_key") or ""),
-        agent_id=str(payload.get("agent_id") or ""),
-    )
+    command, format_error = format_close_command(template, path, payload)
+    if not command:
+        result["status"] = "close-failed"
+        result["blocked_reason"] = format_error or "Close-session command template formatting failed."
+        return result
     completed = subprocess.run(command, capture_output=True, text=True, shell=True, check=False)
     result["command"] = command
     result["stdout"] = completed.stdout.strip()
@@ -167,7 +198,7 @@ def apply_close(project_root: Path, agent_id: str, reason: str, force_native: bo
     write_json(project_root / "ai" / "state" / "agent-sessions.json", registry)
 
     state_path = project_root / "ai" / "state" / "orchestrator-state.json"
-    state = read_json(state_path)
+    state = require_valid_json(state_path, "ai/state/orchestrator-state.json") if state_path.exists() else {}
     active_tasks = state.get("active_tasks", [])
     state["next_owner"] = "orchestrator"
     if retired:
