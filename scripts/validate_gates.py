@@ -373,6 +373,15 @@ def validate(project_root: Path) -> dict:
     if dual_review_enabled and matrix_ok and not has_dual_review_sections(matrix_text):
         blocker_sources.append("department-approval-matrix.md:missing-dual-review-sections")
 
+    review_pass_1 = str(state.get("review_pass_1") or "").strip().upper()
+    review_pass_2 = str(state.get("review_pass_2") or "").strip().upper()
+    review_conflict = bool(state.get("review_conflict", False))
+    dual_review_gate_ready = (not dual_review_enabled) or (
+        review_pass_1 == "PASS" and review_pass_2 == "PASS" and not review_conflict
+    )
+    if dual_review_enabled and not dual_review_gate_ready:
+        blocker_sources.append("dual-review:pending-or-conflict")
+
     release_artifacts_ready = (
         acceptance_ok
         and change_ok
@@ -409,6 +418,7 @@ def validate(project_root: Path) -> dict:
         and gate_recommendation in {"PASS", "PASS_WITH_WARNING"}
         and mainline_regression == "YES"
         and rollback_ready
+        and dual_review_gate_ready
     )
     if not review_stage:
         final_gate_passed = False
@@ -432,6 +442,10 @@ def validate(project_root: Path) -> dict:
         "dual_review_enabled": dual_review_enabled,
         "matrix_has_dual_review_sections": has_dual_review_sections(matrix_text),
         "review_roles": REVIEW_ROLES,
+        "review_pass_1": review_pass_1,
+        "review_pass_2": review_pass_2,
+        "review_conflict": review_conflict,
+        "dual_review_gate_ready": dual_review_gate_ready,
         "test_conclusion": test_conclusion,
         "matrix_recommendation": matrix_recommendation,
         "acceptance_conclusion": acceptance_conclusion,
