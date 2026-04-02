@@ -25,6 +25,7 @@ import context_rollover  # noqa: E402
 import environment_bootstrap  # noqa: E402
 import escalation_manager  # noqa: E402
 import evidence_collector  # noqa: E402
+import ensure_openclaw_agents  # noqa: E402
 import first_run_check  # noqa: E402
 import git_autocommit  # noqa: E402
 import host_interface_probe  # noqa: E402
@@ -5485,15 +5486,31 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
                 encoding="utf-8",
             )
 
-            payload = configure_review_controls.configure(project_root, before_cabinet=6, after_cabinet=3)
+            payload = configure_review_controls.configure(
+                project_root,
+                before_cabinet=6,
+                after_cabinet=3,
+                pass1_agent="duchayuan-pass1",
+                pass2_agent="duchayuan-pass2",
+            )
             self.assertEqual(payload["review_cycle_limit_before_cabinet"], 6)
             self.assertEqual(payload["review_cycle_limit_after_cabinet"], 3)
+            self.assertEqual(payload["review_pass_1_agent_id"], "duchayuan-pass1")
+            self.assertEqual(payload["review_pass_2_agent_id"], "duchayuan-pass2")
 
             controls = json.loads((state_dir / "review-controls.json").read_text(encoding="utf-8"))
             self.assertEqual(controls["review_cycle_limit_before_cabinet"], 6)
+            self.assertEqual(controls["review_pass_1_agent_id"], "duchayuan-pass1")
+            self.assertEqual(controls["review_pass_2_agent_id"], "duchayuan-pass2")
             state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["review_cycle_limit_before_cabinet"], 6)
             self.assertEqual(state["review_cycle_limit_after_cabinet"], 3)
+            self.assertEqual(state["review_pass_1_agent_id"], "duchayuan-pass1")
+            self.assertEqual(state["review_pass_2_agent_id"], "duchayuan-pass2")
+
+    def test_ensure_openclaw_agents_includes_dual_review_agent_ids(self):
+        self.assertIn("duchayuan-pass1", ensure_openclaw_agents.REQUIRED_AGENTS)
+        self.assertIn("duchayuan-pass2", ensure_openclaw_agents.REQUIRED_AGENTS)
 
     def test_resume_customer_decision_restarts_planning_for_scope_reduction(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -6276,6 +6293,8 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
         self.assertIn("review_conflict", payload)
         self.assertIn("review_run_id", payload)
         self.assertIn("review_commit_sha", payload)
+        self.assertIn("review_pass_1_agent_id", payload)
+        self.assertIn("review_pass_2_agent_id", payload)
         self.assertIn("review_arbitration_required", payload)
         self.assertIn("review_arbitration_status", payload)
         self.assertIn("review_arbitration_evidence", payload)
@@ -6289,6 +6308,8 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
         self.assertFalse(payload["review_conflict"])
         self.assertEqual(payload["review_run_id"], "")
         self.assertEqual(payload["review_commit_sha"], "")
+        self.assertEqual(payload["review_pass_1_agent_id"], "duchayuan-pass1")
+        self.assertEqual(payload["review_pass_2_agent_id"], "duchayuan-pass2")
         self.assertFalse(payload["review_arbitration_required"])
         self.assertEqual(payload["review_arbitration_status"], "")
         self.assertEqual(payload["review_arbitration_evidence"], "")

@@ -315,6 +315,10 @@ def ensure_review_controls(state: dict[str, Any]) -> None:
 def sync_review_controls(project_root: Path, state: dict[str, Any]) -> None:
     ensure_review_controls(state)
     payload = read_json(review_controls_path(project_root))
+
+    default_pass1_agent = str(state.get("review_pass_1_agent_id") or "duchayuan-pass1").strip() or "duchayuan-pass1"
+    default_pass2_agent = str(state.get("review_pass_2_agent_id") or "duchayuan-pass2").strip() or "duchayuan-pass2"
+
     if payload:
         state["review_cycle_limit_before_cabinet"] = review_limit_value(
             payload,
@@ -326,11 +330,19 @@ def sync_review_controls(project_root: Path, state: dict[str, Any]) -> None:
             "review_cycle_limit_after_cabinet",
             state["review_cycle_limit_after_cabinet"],
         )
+        default_pass1_agent = str(payload.get("review_pass_1_agent_id") or default_pass1_agent).strip() or "duchayuan-pass1"
+        default_pass2_agent = str(payload.get("review_pass_2_agent_id") or default_pass2_agent).strip() or "duchayuan-pass2"
+
+    state["review_pass_1_agent_id"] = default_pass1_agent
+    state["review_pass_2_agent_id"] = default_pass2_agent
+
     write_json(
         review_controls_path(project_root),
         {
             "review_cycle_limit_before_cabinet": state["review_cycle_limit_before_cabinet"],
             "review_cycle_limit_after_cabinet": state["review_cycle_limit_after_cabinet"],
+            "review_pass_1_agent_id": state["review_pass_1_agent_id"],
+            "review_pass_2_agent_id": state["review_pass_2_agent_id"],
             "updated_at": utc_now(),
         },
     )

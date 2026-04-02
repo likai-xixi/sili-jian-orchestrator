@@ -183,6 +183,8 @@ def ensure_dual_review_state(state: dict[str, Any]) -> dict[str, Any]:
     state.setdefault("review_pass_2_run_id", "")
     state.setdefault("review_pass_1_commit_sha", "")
     state.setdefault("review_pass_2_commit_sha", "")
+    state.setdefault("review_pass_1_agent_id", "duchayuan-pass1")
+    state.setdefault("review_pass_2_agent_id", "duchayuan-pass2")
     state.setdefault("review_arbitration_required", False)
     state.setdefault("review_arbitration_status", "")
     state.setdefault("review_arbitration_evidence", "")

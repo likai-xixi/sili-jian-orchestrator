@@ -18,6 +18,8 @@ REQUIRED_AGENTS = [
     "xingbu",
     "libu",
     "duchayuan",
+    "duchayuan-pass1",
+    "duchayuan-pass2",
 ]
 
 AGENT_SPECS: dict[str, dict[str, str]] = {
@@ -29,6 +31,8 @@ AGENT_SPECS: dict[str, dict[str, str]] = {
     "xingbu": {"label": "刑部", "model": "minimax/MiniMax-M2.7"},
     "libu": {"label": "礼部", "model": "minimax/MiniMax-M2.7"},
     "duchayuan": {"label": "都察院", "model": "minimax/MiniMax-M2.7"},
+    "duchayuan-pass1": {"label": "都察院一审", "model": "minimax/MiniMax-M2.7"},
+    "duchayuan-pass2": {"label": "都察院二审", "model": "minimax/MiniMax-M2.7"},
 }
 
 

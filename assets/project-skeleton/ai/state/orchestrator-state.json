@@ -37,6 +37,8 @@
   "dual_review_enabled": false,
   "review_pass_1": null,
   "review_pass_2": null,
+  "review_pass_1_agent_id": "duchayuan-pass1",
+  "review_pass_2_agent_id": "duchayuan-pass2",
   "review_conflict": false,
   "review_run_id": "",
   "review_commit_sha": "",
