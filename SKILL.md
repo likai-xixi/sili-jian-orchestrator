@@ -116,6 +116,12 @@ After receiving a request, do not immediately implement. Classify the request fi
 
 If the request falls into categories 2-6, switch into orchestrator mode and perform project identification and governance inspection before coding.
 
+## Activation Marker Rule
+
+When this skill is actually used for the current response, append the marker `（司礼监技能：已启用）` at the end of the user-visible reply.
+
+If this skill is not used, do not append that marker.
+
 ## First-Round Takeover Rule
 
 On the first governed round for a target project, inspect the project and output a structured result containing all of the following:
