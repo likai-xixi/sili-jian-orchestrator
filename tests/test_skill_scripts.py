@@ -6280,6 +6280,68 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertFalse(report["state_readable"])
             self.assertFalse(report["phase_gate_passed"])
 
+    def test_validate_gates_blocks_on_doc_coverage_high_risk_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            runtime_dir = project_root / "ai" / "runtime"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+            runtime_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "planning",
+                        "current_status": "planning",
+                        "current_workflow": "feature-delivery",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (state_dir / "feature-registry.json").write_text(
+                json.dumps(
+                    {
+                        "version": "v3.1.1",
+                        "registry_version": "1.0.0",
+                        "repo_id": "demo.repo",
+                        "features": [
+                            {
+                                "feature_id": "auth.login",
+                                "name": "Auth Login",
+                                "risk_level": "high",
+                                "gate_mode": "strict",
+                                "owners": ["xingbu"],
+                                "doc_targets": [],
+                                "evidence": {"code_anchors": ["src/auth.py"]},
+                            }
+                        ],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "doc-ir.json").write_text(
+                json.dumps({"documents": []}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            (runtime_dir / "doc-gate-config.json").write_text(
+                json.dumps({"version": "v3.1.1", "shadowToStrict": {}}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+
+            report = validate_gates.validate(project_root)
+            self.assertTrue(report["doc_coverage_enabled"])
+            self.assertIn("doc-coverage-report:high-risk-missing", report["blocker_sources"])
+            self.assertFalse(report["phase_gate_passed"])
+
     def test_validate_gates_blocks_non_empty_blockers_section(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
