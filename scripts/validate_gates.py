@@ -376,11 +376,20 @@ def validate(project_root: Path) -> dict:
     review_pass_1 = str(state.get("review_pass_1") or "").strip().upper()
     review_pass_2 = str(state.get("review_pass_2") or "").strip().upper()
     review_conflict = bool(state.get("review_conflict", False))
+    review_arbitration_required = bool(state.get("review_arbitration_required", False))
+    review_arbitration_status = str(state.get("review_arbitration_status") or "").strip().lower()
+    review_arbitration_evidence = str(state.get("review_arbitration_evidence") or "").strip()
+    review_arbitration_ready = (not review_arbitration_required) or (
+        review_arbitration_status == "resolved" and bool(review_arbitration_evidence)
+    )
+
     dual_review_gate_ready = (not dual_review_enabled) or (
-        review_pass_1 == "PASS" and review_pass_2 == "PASS" and not review_conflict
+        review_pass_1 == "PASS" and review_pass_2 == "PASS" and not review_conflict and review_arbitration_ready
     )
     if dual_review_enabled and not dual_review_gate_ready:
         blocker_sources.append("dual-review:pending-or-conflict")
+    if dual_review_enabled and review_arbitration_required and not review_arbitration_ready:
+        blocker_sources.append("dual-review:missing-arbitration-evidence")
 
     release_artifacts_ready = (
         acceptance_ok
@@ -445,6 +454,10 @@ def validate(project_root: Path) -> dict:
         "review_pass_1": review_pass_1,
         "review_pass_2": review_pass_2,
         "review_conflict": review_conflict,
+        "review_arbitration_required": review_arbitration_required,
+        "review_arbitration_status": review_arbitration_status,
+        "review_arbitration_evidence": review_arbitration_evidence,
+        "review_arbitration_ready": review_arbitration_ready,
         "dual_review_gate_ready": dual_review_gate_ready,
         "test_conclusion": test_conclusion,
         "matrix_recommendation": matrix_recommendation,

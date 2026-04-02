@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from common import next_step_guidance, read_json, require_valid_json, utc_now, write_json, write_text
+from common import ensure_dual_review_state, next_step_guidance, read_json, require_valid_json, utc_now, write_json, write_text
 from session_registry import ensure_registry_schema, upsert_session
 from workflow_engine import ensure_workflow_progress
 
@@ -495,6 +495,8 @@ def consume_completion(project_root: Path, payload: dict[str, Any], allow_untrac
         state.pop("status_before_blocked", None)
         state["next_action"] = f"Review completion from {agent_id} and dispatch the next ready step."
         state["next_owner"] = "orchestrator"
+
+    ensure_dual_review_state(state)
 
     state["last_completion"] = {
         "agent_id": agent_id,

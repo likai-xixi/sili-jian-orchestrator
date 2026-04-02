@@ -139,6 +139,39 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def _normalize_review_result(value: Any) -> str:
+    normalized = str(value or "").strip().upper()
+    return normalized if normalized in {"PASS", "FAIL"} else ""
+
+
+def sync_dual_review_conflict_state(state: dict[str, Any]) -> dict[str, Any]:
+    pass_1 = _normalize_review_result(state.get("review_pass_1"))
+    pass_2 = _normalize_review_result(state.get("review_pass_2"))
+    has_pair = bool(pass_1 and pass_2)
+    mismatch = has_pair and pass_1 != pass_2
+
+    if mismatch:
+        state["review_conflict"] = True
+        state["review_arbitration_required"] = True
+        if str(state.get("review_arbitration_status") or "").strip().lower() != "resolved":
+            state["review_arbitration_status"] = "pending"
+
+    arbitration_required = bool(state.get("review_arbitration_required", False))
+    arbitration_status = str(state.get("review_arbitration_status") or "").strip().lower()
+    arbitration_evidence = str(state.get("review_arbitration_evidence") or "").strip()
+    arbitration_resolved = arbitration_status == "resolved" and bool(arbitration_evidence)
+
+    if arbitration_required:
+        if arbitration_resolved:
+            state["review_conflict"] = False
+        else:
+            state["review_conflict"] = True
+            if not arbitration_status:
+                state["review_arbitration_status"] = "pending"
+
+    return state
+
+
 def ensure_dual_review_state(state: dict[str, Any]) -> dict[str, Any]:
     state.setdefault("dual_review_enabled", False)
     state.setdefault("review_pass_1", None)
@@ -146,7 +179,13 @@ def ensure_dual_review_state(state: dict[str, Any]) -> dict[str, Any]:
     state.setdefault("review_conflict", False)
     state.setdefault("review_run_id", "")
     state.setdefault("review_commit_sha", "")
-    return state
+    state.setdefault("review_arbitration_required", False)
+    state.setdefault("review_arbitration_status", "")
+    state.setdefault("review_arbitration_evidence", "")
+    state.setdefault("review_arbitrated_by", "")
+    state.setdefault("review_arbitrated_at", "")
+    state.setdefault("review_arbitration_note", "")
+    return sync_dual_review_conflict_state(state)
 
 
 def next_step_guidance(state: dict[str, Any], automation_mode: str | None = None) -> dict[str, Any]:
