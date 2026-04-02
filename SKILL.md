@@ -243,6 +243,7 @@ Read these references when needed:
 - `references/agent-dispatch-policy.md`
 - `references/completion-handling.md`
 - `references/peer-agent-bootstrap.md`
+- `references/doc-coverage-gate-v3.1.1.md` (use when docs are mixed-format and feature-doc coverage gating is required)
 
 Use these assets when operating on a target project:
 
