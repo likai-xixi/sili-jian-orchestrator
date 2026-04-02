@@ -6610,13 +6610,15 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertNotIn("test-report.md", report["placeholder_sources"])
             self.assertTrue(report["phase_gate_passed"])
 
-    def test_validate_gates_requires_doc_coverage_at_final_audit(self):
+    def test_validate_gates_requires_doc_coverage_when_release_allowed(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
             state_dir = project_root / "ai" / "state"
             reports_dir = project_root / "ai" / "reports"
+            runtime_dir = project_root / "ai" / "runtime"
             state_dir.mkdir(parents=True)
             reports_dir.mkdir(parents=True)
+            runtime_dir.mkdir(parents=True)
 
             (state_dir / "orchestrator-state.json").write_text(
                 json.dumps(
@@ -6624,6 +6626,7 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
                         "current_phase": "final-audit",
                         "current_status": "final-audit",
                         "current_workflow": "feature-delivery",
+                        "release_allowed": True,
                     },
                     indent=2,
                     ensure_ascii=False,
@@ -6632,6 +6635,11 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
                 encoding="utf-8",
             )
             (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (runtime_dir / "doc-gate-config.json").write_text(
+                json.dumps({"version": "v3.1.1", "shadowToStrict": {"coverageRateMin": 0.95}}, indent=2, ensure_ascii=False)
+                + "\n",
+                encoding="utf-8",
+            )
 
             report = validate_gates.validate(project_root)
             self.assertTrue(report["doc_coverage_required"])
@@ -7367,7 +7375,9 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
 
             state_dir = project_root / "ai" / "state"
             reports_dir = project_root / "ai" / "reports"
+            runtime_dir = project_root / "ai" / "runtime"
             reports_dir.mkdir(parents=True, exist_ok=True)
+            runtime_dir.mkdir(parents=True, exist_ok=True)
 
             (state_dir / "orchestrator-state.json").write_text(
                 json.dumps(
@@ -7474,6 +7484,18 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             (reports_dir / "change-summary.md").write_text("# Change Summary\n\n- updated\n", encoding="utf-8")
             (reports_dir / "gate-report.md").write_text(
                 "# Gate Report\n\n## Recommendation\n\n- PASS\n\n- mainline regression passed: NO\n- rollback point available: YES\n",
+                encoding="utf-8",
+            )
+
+            (state_dir / "feature-registry.json").write_text(
+                json.dumps({"version": "v3.1.1", "registry_version": "1.0.0", "repo_id": "xianyu", "features": []}, indent=2, ensure_ascii=False)
+                + "\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "doc-ir.json").write_text(json.dumps({"documents": []}, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            (runtime_dir / "doc-gate-config.json").write_text(
+                json.dumps({"version": "v3.1.1", "shadowToStrict": {"coverageRateMin": 0.95}}, indent=2, ensure_ascii=False)
+                + "\n",
                 encoding="utf-8",
             )
 

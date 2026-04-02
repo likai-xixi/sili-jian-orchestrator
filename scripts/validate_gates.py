@@ -308,7 +308,8 @@ def validate(project_root: Path) -> dict:
     if resource_report.get("blocking_gap_count") or resource_report.get("release_validation_pending"):
         blocker_sources.append("resource-gap-report.md")
 
-    doc_coverage_required = current_status in {"final-audit", "accepted", "committed", "archived"} or bool(release_allowed)
+    doc_coverage_policy_enabled = doc_gate_config_path.exists() or doc_coverage_enabled
+    doc_coverage_required = doc_coverage_policy_enabled and (bool(release_allowed) or current_status in {"committed", "archived"})
     if doc_coverage_required and not doc_coverage_report:
         blocker_sources.append("doc-coverage-report:missing")
 
@@ -428,6 +429,7 @@ def validate(project_root: Path) -> dict:
         "resource_due_now_count": resource_report.get("due_now_count", 0),
         "resource_requires_user_input": resource_report.get("requires_user_input", False),
         "doc_coverage_enabled": doc_coverage_enabled,
+        "doc_coverage_policy_enabled": doc_coverage_policy_enabled,
         "doc_coverage_required": doc_coverage_required,
         "doc_coverage_report": doc_coverage_report,
         "phase_gate_passed": phase_gate_passed,

@@ -9,6 +9,7 @@ PROJECT_TOOL_FILES = [
     "common.py",
     "validate_state.py",
     "validate_gates.py",
+    "check_doc_coverage.py",
     "render_agent_repair_brief.py",
     "run_project_guard.py",
 ]
