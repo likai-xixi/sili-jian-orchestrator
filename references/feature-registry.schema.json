@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "feature-registry.schema.json",
+  "title": "Feature Registry",
+  "type": "object",
+  "required": ["version", "registry_version", "repo_id", "features"],
+  "properties": {
+    "version": { "type": "string", "minLength": 1 },
+    "registry_version": { "type": "string", "minLength": 1 },
+    "repo_id": { "type": "string", "minLength": 1 },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["feature_id", "name", "risk_level", "gate_mode", "owners", "evidence"],
+        "properties": {
+          "feature_id": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+          "name": { "type": "string", "minLength": 1 },
+          "risk_level": { "type": "string", "enum": ["high", "medium", "low"] },
+          "gate_mode": { "type": "string", "enum": ["shadow", "warn", "strict"] },
+          "owners": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "doc_targets": { "type": "array", "items": { "type": "string" } },
+          "evidence": {
+            "type": "object",
+            "properties": {
+              "api_paths": { "type": "array", "items": { "type": "string" } },
+              "config_keys": { "type": "array", "items": { "type": "string" } },
+              "db_objects": { "type": "array", "items": { "type": "string" } },
+              "code_anchors": { "type": "array", "items": { "type": "string" } }
+            },
+            "additionalProperties": false
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "risk_level": { "const": "low" }
+              }
+            },
+            "then": {
+              "properties": {
+                "evidence": {
+                  "anyOf": [
+                    { "properties": { "api_paths": { "minItems": 1 } } },
+                    { "properties": { "config_keys": { "minItems": 1 } } },
+                    { "properties": { "db_objects": { "minItems": 1 } } },
+                    { "properties": { "code_anchors": { "minItems": 1 } } }
+                  ]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "evidence": {
+                  "allOf": [
+                    {
+                      "anyOf": [
+                        { "properties": { "api_paths": { "minItems": 1 } } },
+                        { "properties": { "config_keys": { "minItems": 1 } } },
+                        { "properties": { "db_objects": { "minItems": 1 } } },
+                        { "properties": { "code_anchors": { "minItems": 1 } } }
+                      ]
+                    },
+                    {
+                      "anyOf": [
+                        { "allOf": [
+                          { "properties": { "api_paths": { "minItems": 1 } } },
+                          { "properties": { "config_keys": { "minItems": 1 } } }
+                        ] },
+                        { "allOf": [
+                          { "properties": { "api_paths": { "minItems": 1 } } },
+                          { "properties": { "db_objects": { "minItems": 1 } } }
+                        ] },
+                        { "allOf": [
+                          { "properties": { "api_paths": { "minItems": 1 } } },
+                          { "properties": { "code_anchors": { "minItems": 1 } } }
+                        ] },
+                        { "allOf": [
+                          { "properties": { "config_keys": { "minItems": 1 } } },
+                          { "properties": { "db_objects": { "minItems": 1 } } }
+                        ] },
+                        { "allOf": [
+                          { "properties": { "config_keys": { "minItems": 1 } } },
+                          { "properties": { "code_anchors": { "minItems": 1 } } }
+                        ] },
+                        { "allOf": [
+                          { "properties": { "db_objects": { "minItems": 1 } } },
+                          { "properties": { "code_anchors": { "minItems": 1 } } }
+                        ] }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
