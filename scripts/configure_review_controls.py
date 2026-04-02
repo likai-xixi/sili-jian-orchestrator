@@ -14,6 +14,7 @@ def configure(
     after_cabinet: int | None = None,
     pass1_agent: str | None = None,
     pass2_agent: str | None = None,
+    planning_dual_review: bool | None = None,
 ) -> dict:
     orchestrator_state_path = state_path(project_root)
     state = require_valid_json(orchestrator_state_path, "ai/state/orchestrator-state.json") if orchestrator_state_path.exists() else {}
@@ -28,6 +29,11 @@ def configure(
     )
     payload["review_pass_1_agent_id"] = str(pass1_agent or payload.get("review_pass_1_agent_id") or "duchayuan-pass1").strip() or "duchayuan-pass1"
     payload["review_pass_2_agent_id"] = str(pass2_agent or payload.get("review_pass_2_agent_id") or "duchayuan-pass2").strip() or "duchayuan-pass2"
+    payload["planning_dual_review_enabled"] = (
+        bool(planning_dual_review)
+        if planning_dual_review is not None
+        else bool(payload.get("planning_dual_review_enabled", False))
+    )
     payload["updated_at"] = utc_now()
     write_json(review_controls_path(project_root), payload)
 
@@ -44,7 +50,17 @@ def main() -> None:
     parser.add_argument("--after-cabinet", type=int, help="Review limit after cabinet replan")
     parser.add_argument("--pass1-agent", help="Agent id used for duchayuan pass1 review")
     parser.add_argument("--pass2-agent", help="Agent id used for duchayuan pass2 review")
+    parser.add_argument("--planning-dual-review", action="store_true", help="Enable dual-review compare hints during planning discussion")
+    parser.add_argument("--no-planning-dual-review", action="store_true", help="Disable dual-review compare hints during planning discussion")
     args = parser.parse_args()
+
+    planning_dual_review = None
+    if args.planning_dual_review and args.no_planning_dual_review:
+        raise SystemExit("Cannot pass both --planning-dual-review and --no-planning-dual-review")
+    if args.planning_dual_review:
+        planning_dual_review = True
+    elif args.no_planning_dual_review:
+        planning_dual_review = False
 
     payload = configure(
         Path(args.project_root).resolve(),
@@ -52,6 +68,7 @@ def main() -> None:
         args.after_cabinet,
         pass1_agent=args.pass1_agent,
         pass2_agent=args.pass2_agent,
+        planning_dual_review=planning_dual_review,
     )
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 

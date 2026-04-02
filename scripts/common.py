@@ -185,6 +185,7 @@ def ensure_dual_review_state(state: dict[str, Any]) -> dict[str, Any]:
     state.setdefault("review_pass_2_commit_sha", "")
     state.setdefault("review_pass_1_agent_id", "duchayuan-pass1")
     state.setdefault("review_pass_2_agent_id", "duchayuan-pass2")
+    state.setdefault("planning_dual_review_enabled", False)
     state.setdefault("review_arbitration_required", False)
     state.setdefault("review_arbitration_status", "")
     state.setdefault("review_arbitration_evidence", "")
@@ -644,6 +645,9 @@ def inspect_project(project_root: Path, intent: str = "auto") -> dict[str, Any]:
         "customer_acknowledged_implementation": task_intake_status["customer_acknowledged_implementation"],
         "customer_confirmed_requirement": task_intake_status["customer_confirmed_requirement"],
         "development_approved": task_intake_status["development_approved"],
+        "planning_dual_review_enabled": parse_bool(orchestrator_state.get("planning_dual_review_enabled", False), default=False),
+        "review_pass_1_agent_id": str(orchestrator_state.get("review_pass_1_agent_id") or "duchayuan-pass1"),
+        "review_pass_2_agent_id": str(orchestrator_state.get("review_pass_2_agent_id") or "duchayuan-pass2"),
         "updated_at": utc_now(),
     }
 

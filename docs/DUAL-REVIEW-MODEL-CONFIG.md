@@ -23,7 +23,8 @@ python3 scripts/ensure_openclaw_agents.py --create-missing
 python3 scripts/configure_review_controls.py \
   <project_root> \
   --pass1-agent duchayuan-pass1 \
-  --pass2-agent duchayuan-pass2
+  --pass2-agent duchayuan-pass2 \
+  --planning-dual-review
 ```
 
 配置写入：

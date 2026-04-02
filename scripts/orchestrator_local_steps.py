@@ -318,6 +318,7 @@ def sync_review_controls(project_root: Path, state: dict[str, Any]) -> None:
 
     default_pass1_agent = str(state.get("review_pass_1_agent_id") or "duchayuan-pass1").strip() or "duchayuan-pass1"
     default_pass2_agent = str(state.get("review_pass_2_agent_id") or "duchayuan-pass2").strip() or "duchayuan-pass2"
+    planning_dual_enabled = bool(state.get("planning_dual_review_enabled", False))
 
     if payload:
         state["review_cycle_limit_before_cabinet"] = review_limit_value(
@@ -332,9 +333,11 @@ def sync_review_controls(project_root: Path, state: dict[str, Any]) -> None:
         )
         default_pass1_agent = str(payload.get("review_pass_1_agent_id") or default_pass1_agent).strip() or "duchayuan-pass1"
         default_pass2_agent = str(payload.get("review_pass_2_agent_id") or default_pass2_agent).strip() or "duchayuan-pass2"
+        planning_dual_enabled = bool(payload.get("planning_dual_review_enabled", planning_dual_enabled))
 
     state["review_pass_1_agent_id"] = default_pass1_agent
     state["review_pass_2_agent_id"] = default_pass2_agent
+    state["planning_dual_review_enabled"] = planning_dual_enabled
 
     write_json(
         review_controls_path(project_root),
@@ -343,6 +346,7 @@ def sync_review_controls(project_root: Path, state: dict[str, Any]) -> None:
             "review_cycle_limit_after_cabinet": state["review_cycle_limit_after_cabinet"],
             "review_pass_1_agent_id": state["review_pass_1_agent_id"],
             "review_pass_2_agent_id": state["review_pass_2_agent_id"],
+            "planning_dual_review_enabled": state["planning_dual_review_enabled"],
             "updated_at": utc_now(),
         },
     )
@@ -911,7 +915,13 @@ def planning_follow_up(info: dict[str, Any]) -> str:
         actions.append("freeze the approved requirement in task-intake.md")
     if not info.get("development_approved"):
         actions.append("record explicit customer approval to start development")
-    return actions[0] if actions else "Continue the governed workflow."
+
+    base = actions[0] if actions else "Continue the governed workflow."
+    if bool(info.get("planning_dual_review_enabled", False)):
+        pass1 = str(info.get("review_pass_1_agent_id") or "duchayuan-pass1").strip() or "duchayuan-pass1"
+        pass2 = str(info.get("review_pass_2_agent_id") or "duchayuan-pass2").strip() or "duchayuan-pass2"
+        return f"{base} Then collect parallel planning opinions from {pass1} and {pass2}, and reconcile any conflicts before freezing the plan."
+    return base
 
 
 def planning_guided_options(info: dict[str, Any]) -> list[dict[str, str]]:

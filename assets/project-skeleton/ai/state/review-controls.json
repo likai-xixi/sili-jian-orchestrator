@@ -2,5 +2,6 @@
   "review_cycle_limit_before_cabinet": 4,
   "review_cycle_limit_after_cabinet": 2,
   "review_pass_1_agent_id": "duchayuan-pass1",
-  "review_pass_2_agent_id": "duchayuan-pass2"
+  "review_pass_2_agent_id": "duchayuan-pass2",
+  "planning_dual_review_enabled": false
 }

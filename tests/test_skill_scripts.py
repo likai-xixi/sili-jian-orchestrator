@@ -5492,21 +5492,25 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
                 after_cabinet=3,
                 pass1_agent="duchayuan-pass1",
                 pass2_agent="duchayuan-pass2",
+                planning_dual_review=True,
             )
             self.assertEqual(payload["review_cycle_limit_before_cabinet"], 6)
             self.assertEqual(payload["review_cycle_limit_after_cabinet"], 3)
             self.assertEqual(payload["review_pass_1_agent_id"], "duchayuan-pass1")
             self.assertEqual(payload["review_pass_2_agent_id"], "duchayuan-pass2")
+            self.assertTrue(payload["planning_dual_review_enabled"])
 
             controls = json.loads((state_dir / "review-controls.json").read_text(encoding="utf-8"))
             self.assertEqual(controls["review_cycle_limit_before_cabinet"], 6)
             self.assertEqual(controls["review_pass_1_agent_id"], "duchayuan-pass1")
             self.assertEqual(controls["review_pass_2_agent_id"], "duchayuan-pass2")
+            self.assertTrue(controls["planning_dual_review_enabled"])
             state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["review_cycle_limit_before_cabinet"], 6)
             self.assertEqual(state["review_cycle_limit_after_cabinet"], 3)
             self.assertEqual(state["review_pass_1_agent_id"], "duchayuan-pass1")
             self.assertEqual(state["review_pass_2_agent_id"], "duchayuan-pass2")
+            self.assertTrue(state["planning_dual_review_enabled"])
 
     def test_ensure_openclaw_agents_includes_dual_review_agent_ids(self):
         self.assertIn("duchayuan-pass1", ensure_openclaw_agents.REQUIRED_AGENTS)
@@ -6310,6 +6314,7 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
         self.assertEqual(payload["review_commit_sha"], "")
         self.assertEqual(payload["review_pass_1_agent_id"], "duchayuan-pass1")
         self.assertEqual(payload["review_pass_2_agent_id"], "duchayuan-pass2")
+        self.assertFalse(payload["planning_dual_review_enabled"])
         self.assertFalse(payload["review_arbitration_required"])
         self.assertEqual(payload["review_arbitration_status"], "")
         self.assertEqual(payload["review_arbitration_evidence"], "")
