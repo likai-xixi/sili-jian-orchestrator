@@ -154,6 +154,11 @@ def has_department_matrix_coverage(text: str) -> bool:
     return all(token in lowered for token in required)
 
 
+def has_dual_review_sections(text: str) -> bool:
+    lowered = text.lower()
+    return "## reviewer duchayuan-pass1" in lowered and "## reviewer duchayuan-pass2" in lowered
+
+
 def has_completed_department_reviews(text: str) -> bool:
     reviewer_sections = {
         f"reviewer {reviewer}": [peer for peer in REVIEW_ROLES if peer != reviewer] for reviewer in REVIEW_ROLES
@@ -341,7 +346,10 @@ def validate(project_root: Path) -> dict:
     test_conclusion = extract_conclusion(test_text, "Recommendation").upper()
     matrix_recommendation = extract_conclusion(matrix_text, "Recommendation").upper()
     acceptance_conclusion = extract_conclusion(acceptance_text, "Final Conclusion").upper()
+    dual_review_enabled = bool(state.get("dual_review_enabled", False))
     matrix_complete = has_department_matrix_coverage(matrix_text) and has_completed_department_reviews(matrix_text)
+    if dual_review_enabled:
+        matrix_complete = matrix_complete and has_dual_review_sections(matrix_text)
     gate_recommendation = extract_conclusion(gate_text, "Recommendation").upper()
     mainline_regression = extract_gate_value(gate_text, "mainline regression passed")
     rollback_point = extract_gate_value(gate_text, "rollback point available")
@@ -362,6 +370,9 @@ def validate(project_root: Path) -> dict:
         and matrix_complete
         and matrix_recommendation in PASS_CONCLUSIONS
     )
+    if dual_review_enabled and matrix_ok and not has_dual_review_sections(matrix_text):
+        blocker_sources.append("department-approval-matrix.md:missing-dual-review-sections")
+
     release_artifacts_ready = (
         acceptance_ok
         and change_ok
@@ -418,6 +429,8 @@ def validate(project_root: Path) -> dict:
         "blocker_sources": blocker_sources,
         "placeholder_sources": placeholder_sources,
         "matrix_complete": matrix_complete,
+        "dual_review_enabled": dual_review_enabled,
+        "matrix_has_dual_review_sections": has_dual_review_sections(matrix_text),
         "review_roles": REVIEW_ROLES,
         "test_conclusion": test_conclusion,
         "matrix_recommendation": matrix_recommendation,

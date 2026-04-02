@@ -991,10 +991,11 @@ def build_department_matrix(project_root: Path, state: dict[str, Any], step_id: 
         "",
     ]
     review_roles = CROSS_REVIEW_ROLES if step_id == "department-review" and state.get("current_workflow") == "feature-delivery" else DEPARTMENT_ROLES
-    for reviewer in review_roles:
+
+    def append_reviewer_section(reviewer: str, peers: list[str]) -> None:
         sections.extend([f"## Reviewer {reviewer}", ""])
         findings: list[str] = []
-        for peer in review_roles:
+        for peer in peers:
             if peer == reviewer:
                 continue
             session = registry.get(peer, {}) if isinstance(registry, dict) else {}
@@ -1034,6 +1035,14 @@ def build_department_matrix(project_root: Path, state: dict[str, Any], step_id: 
         sections.append("- responses: none")
         sections.append(f"- closure: {'closed' if not findings else 'open'}")
         sections.append("")
+
+    for reviewer in review_roles:
+        append_reviewer_section(reviewer, review_roles)
+
+    if bool(state.get("dual_review_enabled", False)) and step_id == "department-review" and state.get("current_workflow") == "feature-delivery":
+        base_peers = [role for role in DEPARTMENT_ROLES]
+        append_reviewer_section("duchayuan-pass1", base_peers)
+        append_reviewer_section("duchayuan-pass2", base_peers)
 
     recommendation = "PASS" if not blockers else "BLOCKER"
     categories = blocker_categories(sorted(set(blockers)))

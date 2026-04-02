@@ -6434,6 +6434,62 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertIn("doc-coverage-report:unregistered-feature-ref", report["blocker_sources"])
             self.assertFalse(report["phase_gate_passed"])
 
+    def test_validate_gates_blocks_when_dual_review_sections_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "department-review",
+                        "current_status": "department-review",
+                        "current_workflow": "feature-delivery",
+                        "dual_review_enabled": True,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (reports_dir / "test-report.md").write_text("## Recommendation\n\n- PASS\n", encoding="utf-8")
+            (reports_dir / "acceptance-report.md").write_text("## Final Conclusion\n\n- PASS\n", encoding="utf-8")
+            (reports_dir / "change-summary.md").write_text("# Change Summary\n", encoding="utf-8")
+            (reports_dir / "gate-report.md").write_text("## Recommendation\n\n- PASS\n", encoding="utf-8")
+            (reports_dir / "department-approval-matrix.md").write_text(
+                "# Department Approval Matrix\n\n"
+                "## Reviewer libu2\n\n"
+                "- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n"
+                "- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer hubu\n\n"
+                "- libu2: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n"
+                "- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer gongbu\n\n"
+                "- libu2: PASS\n- hubu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n"
+                "- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer bingbu\n\n"
+                "- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- libu: PASS\n- xingbu: PASS\n"
+                "- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer libu\n\n"
+                "- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- xingbu: PASS\n"
+                "- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer xingbu\n\n"
+                "- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n"
+                "- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Recommendation\n\n- PASS\n",
+                encoding="utf-8",
+            )
+
+            report = validate_gates.validate(project_root)
+            self.assertTrue(report["dual_review_enabled"])
+            self.assertIn("department-approval-matrix.md:missing-dual-review-sections", report["blocker_sources"])
+            self.assertFalse(report["matrix_complete"])
+
     def test_validate_gates_blocks_non_empty_blockers_section(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
