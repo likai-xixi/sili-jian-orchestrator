@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from common import read_json, read_text, utc_now, write_json, write_text
+from check_doc_coverage import build_report as build_doc_coverage_report
 from provider_evidence import collect_provider_evidence
 from repo_command_detector import command_summary
 
@@ -240,6 +241,35 @@ def collect_evidence(project_root: Path, force: bool = False) -> dict:
     matrix_text = read_text(reports_dir / "department-approval-matrix.md")
     acceptance_text = read_text(reports_dir / "acceptance-report.md")
     change_text = read_text(reports_dir / "change-summary.md")
+
+    registry_payload = read_json(project_root / "ai" / "state" / "feature-registry.json")
+    doc_ir_payload = read_json(reports_dir / "doc-ir.json")
+    doc_gate_config = read_json(project_root / "ai" / "runtime" / "doc-gate-config.json")
+    doc_coverage = {}
+    if registry_payload and doc_ir_payload:
+        doc_coverage = build_doc_coverage_report(
+            registry_payload,
+            doc_ir_payload,
+            project_root=project_root,
+            config=doc_gate_config,
+        )
+
+    doc_coverage_summary = "not-enabled"
+    doc_coverage_detail_lines: list[str] = []
+    if doc_coverage:
+        summary = doc_coverage.get("summary", {})
+        doc_coverage_summary = (
+            f"feature_ref={summary.get('feature_ref_coverage_rate', 0)}, "
+            f"doc_target={summary.get('doc_target_coverage_rate', 0)}"
+        )
+        doc_coverage_detail_lines = [
+            f"- missing_in_docs: {len(doc_coverage.get('missing_in_docs', []))}",
+            f"- high_risk_missing_in_docs: {len(doc_coverage.get('high_risk_missing_in_docs', []))}",
+            f"- unregistered_in_docs: {len(doc_coverage.get('unregistered_in_docs', []))}",
+            f"- block_high_risk_if_missing: {'YES' if doc_coverage.get('decision_hint', {}).get('block_high_risk_if_missing') else 'NO'}",
+            f"- high_risk_alert_if_unregistered: {'YES' if doc_coverage.get('decision_hint', {}).get('high_risk_alert_if_unregistered_in_docs') else 'NO'}",
+        ]
+
     gate_report = f"""# Gate Report
 
 ## Basic Gates
@@ -265,6 +295,11 @@ def collect_evidence(project_root: Path, force: bool = False) -> dict:
 - mainline regression passed: {mainline_result}
 - rollback point available: {'YES' if rollback_status in {'PASS', 'PASS_WITH_WARNING'} or not state.get('release_allowed') else 'NO'}
 
+## Doc Coverage Gates
+
+- coverage summary: {doc_coverage_summary}
+{chr(10).join(doc_coverage_detail_lines) if doc_coverage_detail_lines else '- details: none'}
+
 ## Recommendation
 
 - {recommendation}
@@ -287,6 +322,7 @@ def collect_evidence(project_root: Path, force: bool = False) -> dict:
         "release_recommendation": release_recommendation,
         "mainline_result": mainline_result,
         "blockers": blocker_lines,
+        "doc_coverage": doc_coverage,
         "report_paths": {
             "test_report": str((reports_dir / "test-report.md").resolve()),
             "gate_report": str((reports_dir / "gate-report.md").resolve()),
