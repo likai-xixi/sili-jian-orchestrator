@@ -967,6 +967,71 @@ def planning_guided_options(info: dict[str, Any]) -> list[dict[str, str]]:
     return options
 
 
+def planning_opinion_report_path(project_root: Path, agent_id: str) -> Path:
+    safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in str(agent_id or "reviewer")).strip("-")
+    return reports_dir(project_root) / f"planning-opinion-{safe}.md"
+
+
+def write_planning_dual_review_diff(project_root: Path, info: dict[str, Any]) -> None:
+    pass1 = str(info.get("review_pass_1_agent_id") or "duchayuan-pass1").strip() or "duchayuan-pass1"
+    pass2 = str(info.get("review_pass_2_agent_id") or "duchayuan-pass2").strip() or "duchayuan-pass2"
+    pass1_path = planning_opinion_report_path(project_root, pass1)
+    pass2_path = planning_opinion_report_path(project_root, pass2)
+    pass1_text = read_text(pass1_path)
+    pass2_text = read_text(pass2_path)
+
+    pass1_lines = {line.strip("- ").strip() for line in pass1_text.splitlines() if line.strip().startswith("-")}
+    pass2_lines = {line.strip("- ").strip() for line in pass2_text.splitlines() if line.strip().startswith("-")}
+    only_pass1 = sorted(item for item in (pass1_lines - pass2_lines) if item)
+    only_pass2 = sorted(item for item in (pass2_lines - pass1_lines) if item)
+
+    pass1_rec = extract_conclusion(pass1_text, "Recommendation") or "PENDING"
+    pass2_rec = extract_conclusion(pass2_text, "Recommendation") or "PENDING"
+
+    lines = [
+        "# Planning Dual Review Diff",
+        "",
+        f"- pass1_agent: {pass1}",
+        f"- pass2_agent: {pass2}",
+        f"- pass1_report_present: {'yes' if pass1_text else 'no'}",
+        f"- pass2_report_present: {'yes' if pass2_text else 'no'}",
+        f"- pass1_recommendation: {pass1_rec}",
+        f"- pass2_recommendation: {pass2_rec}",
+        f"- generated_at: {utc_now()}",
+        "",
+        "## Conflict Summary",
+    ]
+
+    if pass1_text and pass2_text:
+        if not only_pass1 and not only_pass2 and str(pass1_rec).upper() == str(pass2_rec).upper():
+            lines.append("- status: aligned")
+            lines.append("- detail: no material conflict detected between pass1/pass2 planning opinions")
+        else:
+            lines.append("- status: conflict-detected")
+            lines.append("- detail: reconcile the differences below before freezing the plan")
+    else:
+        lines.append("- status: pending-input")
+        lines.append("- detail: waiting for both planning opinion reports")
+
+    lines.extend(["", "## Pass1 Only Items"])
+    if only_pass1:
+        lines.extend(f"- {item}" for item in only_pass1)
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "## Pass2 Only Items"])
+    if only_pass2:
+        lines.extend(f"- {item}" for item in only_pass2)
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "## Inputs"])
+    lines.append(f"- pass1_report: {pass1_path}")
+    lines.append(f"- pass2_report: {pass2_path}")
+
+    write_text(reports_dir(project_root) / "planning-dual-review-diff.md", "\n".join(lines).rstrip() + "\n")
+
+
 def write_planning_options_report(project_root: Path, info: dict[str, Any]) -> None:
     options = planning_guided_options(info)
     content = [
@@ -989,6 +1054,8 @@ def write_planning_options_report(project_root: Path, info: dict[str, Any]) -> N
             ]
         )
     write_text(reports_dir(project_root) / "planning-options.md", "\n".join(content).rstrip() + "\n")
+    if bool(info.get("planning_dual_review_enabled", False)):
+        write_planning_dual_review_diff(project_root, info)
 
 
 def build_department_matrix(project_root: Path, state: dict[str, Any], step_id: str) -> None:

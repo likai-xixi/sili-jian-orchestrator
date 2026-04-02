@@ -34,6 +34,10 @@ python3 scripts/configure_review_controls.py \
 关键字段：
 - `review_pass_1_agent_id`
 - `review_pass_2_agent_id`
+- `planning_dual_review_enabled`
+
+当 `planning_dual_review_enabled=true` 时，规划阶段会自动生成：
+- `ai/reports/planning-dual-review-diff.md`（两路方案差异汇总）
 
 ## 三、门禁不变
 双审门禁仍要求：

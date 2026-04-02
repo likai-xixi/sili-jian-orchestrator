@@ -5516,6 +5516,38 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
         self.assertIn("duchayuan-pass1", ensure_openclaw_agents.REQUIRED_AGENTS)
         self.assertIn("duchayuan-pass2", ensure_openclaw_agents.REQUIRED_AGENTS)
 
+    def test_write_planning_options_report_generates_dual_review_diff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            reports_dir = project_root / "ai" / "reports"
+            reports_dir.mkdir(parents=True)
+
+            (reports_dir / "planning-opinion-duchayuan-pass1.md").write_text(
+                "# Planning Opinion\n\n## Recommendation\n\n- PASS\n\n- api contract freeze\n- keep rollout staged\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "planning-opinion-duchayuan-pass2.md").write_text(
+                "# Planning Opinion\n\n## Recommendation\n\n- PASS_WITH_WARNING\n\n- keep rollout staged\n- add extra smoke tests\n",
+                encoding="utf-8",
+            )
+
+            info = {
+                "current_status": "planning",
+                "planning_ready": False,
+                "next_action": "continue planning",
+                "planning_dual_review_enabled": True,
+                "review_pass_1_agent_id": "duchayuan-pass1",
+                "review_pass_2_agent_id": "duchayuan-pass2",
+            }
+            orchestrator_local_steps.write_planning_options_report(project_root, info)
+
+            diff_path = reports_dir / "planning-dual-review-diff.md"
+            self.assertTrue(diff_path.exists())
+            diff_text = diff_path.read_text(encoding="utf-8")
+            self.assertIn("conflict-detected", diff_text)
+            self.assertIn("api contract freeze", diff_text)
+            self.assertIn("add extra smoke tests", diff_text)
+
     def test_resume_customer_decision_restarts_planning_for_scope_reduction(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
