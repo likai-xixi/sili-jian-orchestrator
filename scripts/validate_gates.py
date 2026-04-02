@@ -7,6 +7,7 @@ from pathlib import Path
 
 from common import PASS_CONCLUSIONS, extract_conclusion, extract_field_value, read_json, read_text
 from resource_requirements import write_report as write_resource_gap_report
+from check_doc_coverage import build_report as build_doc_coverage_report
 
 
 REVIEW_ROLES = ["libu2", "hubu", "gongbu", "bingbu", "libu", "xingbu"]
@@ -274,6 +275,18 @@ def validate(project_root: Path) -> dict:
     gate_text = read_text(reports_dir / "gate-report.md")
     resource_report = write_resource_gap_report(project_root)
 
+    registry_path = state_dir / "feature-registry.json"
+    doc_ir_path = reports_dir / "doc-ir.json"
+    doc_gate_config_path = project_root / "ai" / "runtime" / "doc-gate-config.json"
+    doc_coverage_report: dict = {}
+    doc_coverage_enabled = registry_path.exists() and doc_ir_path.exists()
+    if doc_coverage_enabled:
+        registry_payload = read_json(registry_path)
+        doc_ir_payload = read_json(doc_ir_path)
+        config_payload = read_json(doc_gate_config_path)
+        if registry_payload and doc_ir_payload:
+            doc_coverage_report = build_doc_coverage_report(registry_payload, doc_ir_payload, config=config_payload)
+
     blocker_sources = []
     placeholder_sources = []
     for name in ["test-report.md", "department-approval-matrix.md", "acceptance-report.md", "change-summary.md", "gate-report.md"]:
@@ -289,6 +302,13 @@ def validate(project_root: Path) -> dict:
             placeholder_sources.append(name)
     if resource_report.get("blocking_gap_count") or resource_report.get("release_validation_pending"):
         blocker_sources.append("resource-gap-report.md")
+
+    if doc_coverage_report:
+        decision_hint = doc_coverage_report.get("decision_hint", {})
+        if decision_hint.get("block_high_risk_if_missing"):
+            blocker_sources.append("doc-coverage-report:high-risk-missing")
+        if decision_hint.get("high_risk_alert_if_unregistered_in_docs"):
+            blocker_sources.append("doc-coverage-report:unregistered-feature-ref")
 
     test_conclusion = extract_conclusion(test_text, "Recommendation").upper()
     matrix_recommendation = extract_conclusion(matrix_text, "Recommendation").upper()
@@ -381,6 +401,8 @@ def validate(project_root: Path) -> dict:
         "resource_gap_count": resource_report.get("resource_gap_count", 0),
         "resource_due_now_count": resource_report.get("due_now_count", 0),
         "resource_requires_user_input": resource_report.get("requires_user_input", False),
+        "doc_coverage_enabled": doc_coverage_enabled,
+        "doc_coverage_report": doc_coverage_report,
         "phase_gate_passed": phase_gate_passed,
         "release_stage": release_stage,
         "final_gate_passed": final_gate_passed,
