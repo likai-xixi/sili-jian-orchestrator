@@ -285,7 +285,12 @@ def validate(project_root: Path) -> dict:
         doc_ir_payload = read_json(doc_ir_path)
         config_payload = read_json(doc_gate_config_path)
         if registry_payload and doc_ir_payload:
-            doc_coverage_report = build_doc_coverage_report(registry_payload, doc_ir_payload, config=config_payload)
+            doc_coverage_report = build_doc_coverage_report(
+                registry_payload,
+                doc_ir_payload,
+                project_root=project_root,
+                config=config_payload,
+            )
 
     blocker_sources = []
     placeholder_sources = []

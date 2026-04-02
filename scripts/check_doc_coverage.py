@@ -33,7 +33,12 @@ def collect_doc_features(ir_payload: dict) -> set[str]:
     return out
 
 
-def build_doc_target_coverage(registry: dict) -> dict[str, object]:
+def _resolve_target_path(project_root: Path, target: str) -> Path:
+    p = Path(target)
+    return p if p.is_absolute() else (project_root / p)
+
+
+def build_doc_target_coverage(registry: dict, project_root: Path) -> dict[str, object]:
     features = registry.get("features", [])
     total_targets = 0
     covered_targets = 0
@@ -46,10 +51,19 @@ def build_doc_target_coverage(registry: dict) -> dict[str, object]:
             continue
         for target in targets:
             total_targets += 1
-            if Path(target).exists():
+            path = _resolve_target_path(project_root, target)
+            if not path.exists():
+                missing_targets.append(
+                    {"feature_id": feature_id, "doc_target": target, "reason": "file-not-found"}
+                )
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if feature_id in text:
                 covered_targets += 1
             else:
-                missing_targets.append({"feature_id": feature_id, "doc_target": target})
+                missing_targets.append(
+                    {"feature_id": feature_id, "doc_target": target, "reason": "feature-id-not-found"}
+                )
 
     rate = 1.0 if total_targets == 0 else covered_targets / total_targets
     return {
@@ -67,7 +81,7 @@ def resolve_risk(feature_id: str, registry: dict) -> str:
     return "low"
 
 
-def build_report(registry: dict, ir_payload: dict, config: dict | None = None) -> dict:
+def build_report(registry: dict, ir_payload: dict, project_root: Path, config: dict | None = None) -> dict:
     expected = collect_expected_features(registry)
     observed = collect_doc_features(ir_payload)
 
@@ -78,7 +92,7 @@ def build_report(registry: dict, ir_payload: dict, config: dict | None = None) -
     covered = len(expected & observed)
     feature_ref_coverage = 1.0 if total == 0 else covered / total
 
-    doc_target_stats = build_doc_target_coverage(registry)
+    doc_target_stats = build_doc_target_coverage(registry, project_root)
 
     high_risk_missing = [fid for fid in missing_in_docs if resolve_risk(fid, registry) == "high"]
 
@@ -132,6 +146,7 @@ def main() -> int:
     parser.add_argument("--doc-ir", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--config", required=False, type=Path)
+    parser.add_argument("--project-root", required=False, type=Path, help="project root for resolving doc_targets")
     parser.add_argument("--history", required=False, type=Path, help="optional jsonl history output")
     args = parser.parse_args()
 
@@ -145,7 +160,8 @@ def main() -> int:
     registry = load_json(args.registry)
     ir_payload = load_json(args.doc_ir)
     config = load_json(args.config) if args.config and args.config.exists() else {}
-    report = build_report(registry, ir_payload, config=config)
+    project_root = args.project_root.resolve() if args.project_root else args.registry.resolve().parents[2]
+    report = build_report(registry, ir_payload, project_root=project_root, config=config)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
