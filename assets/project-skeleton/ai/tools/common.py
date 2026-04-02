@@ -139,6 +139,16 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def ensure_dual_review_state(state: dict[str, Any]) -> dict[str, Any]:
+    state.setdefault("dual_review_enabled", False)
+    state.setdefault("review_pass_1", None)
+    state.setdefault("review_pass_2", None)
+    state.setdefault("review_conflict", False)
+    state.setdefault("review_run_id", "")
+    state.setdefault("review_commit_sha", "")
+    return state
+
+
 def next_step_guidance(state: dict[str, Any], automation_mode: str | None = None) -> dict[str, Any]:
     next_owner = str(state.get("next_owner", "")).strip()
     next_action = str(state.get("next_action", "")).strip()

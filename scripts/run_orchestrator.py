@@ -7,7 +7,7 @@ from pathlib import Path
 from automation_control import ensure_control_state
 from build_dispatch_payload import build_prompt
 from close_session import apply_close
-from common import read_json, require_valid_json, utc_now, write_json, write_text
+from common import ensure_dual_review_state, read_json, require_valid_json, utc_now, write_json, write_text
 from context_rollover import create_rollover
 from openclaw_adapter import dispatch_payload
 from orchestrator_local_steps import execute_local_step, is_local_orchestrator_step
@@ -294,6 +294,7 @@ def run(project_root: Path, max_dispatch: int = 7, transport: str | None = None)
     ensure_registry_schema(project_root)
     state_path = project_root / "ai" / "state" / "orchestrator-state.json"
     state = require_valid_json(state_path, "ai/state/orchestrator-state.json")
+    ensure_dual_review_state(state)
     if str(state.get("current_status", "")).strip().lower() == "await-customer-decision":
         report_path = project_root / "ai" / "reports" / "customer-decision-required.md"
         return {

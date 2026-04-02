@@ -4,7 +4,7 @@ import argparse
 import shutil
 from pathlib import Path
 
-from common import TEST_DIRS, project_has_existing_context, read_json, read_text, write_json, write_text
+from common import TEST_DIRS, ensure_dual_review_state, project_has_existing_context, read_json, read_text, write_json, write_text
 from sync_project_tools import assert_project_tools_synced
 
 
@@ -101,6 +101,7 @@ def apply_takeover_defaults(project_root: Path) -> None:
 
     orchestrator_state = read_json(orchestrator_state_path)
     if orchestrator_state:
+        ensure_dual_review_state(orchestrator_state)
         orchestrator_state["current_phase"] = "planning"
         orchestrator_state["current_status"] = "draft"
         orchestrator_state["current_workflow"] = "takeover-project"

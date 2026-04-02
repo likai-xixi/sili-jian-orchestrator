@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-from common import PASS_CONCLUSIONS, extract_conclusion, extract_field_value, read_json, read_text
+from common import PASS_CONCLUSIONS, ensure_dual_review_state, extract_conclusion, extract_field_value, read_json, read_text
 from resource_requirements import write_report as write_resource_gap_report
 from check_doc_coverage import build_report as build_doc_coverage_report
 
@@ -258,6 +258,7 @@ def validate(project_root: Path) -> dict:
 
     state_path = state_dir / "orchestrator-state.json"
     state = read_json(state_path)
+    ensure_dual_review_state(state)
     state_present = state_path.exists()
     state_readable = state_present and bool(state)
     current_status = str(state.get("current_status", "draft")).lower()

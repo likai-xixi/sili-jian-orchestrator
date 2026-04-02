@@ -6,6 +6,7 @@ from typing import Any
 from common import (
     HANDOFF_DIRS,
     TEST_DIRS,
+    ensure_dual_review_state,
     extract_conclusion,
     extract_field_value,
     inspect_project,
@@ -1057,6 +1058,7 @@ def build_department_matrix(project_root: Path, state: dict[str, Any], step_id: 
 def apply_post_completion_state(project_root: Path, step: WorkflowStep) -> None:
     path = state_path(project_root)
     state = require_valid_json(path, "ai/state/orchestrator-state.json") if path.exists() else {}
+    ensure_dual_review_state(state)
     sync_review_controls(project_root, state)
     workflow = str(state.get("current_workflow", ""))
     if step.id == "identify-project":
@@ -1156,6 +1158,7 @@ def execute_local_step(project_root: Path, step: WorkflowStep, task_id: str) -> 
     ensure_governance_surface(project_root)
     resolved_state_path = state_path(project_root)
     state = require_valid_json(resolved_state_path, "ai/state/orchestrator-state.json") if resolved_state_path.exists() else {}
+    ensure_dual_review_state(state)
     step_summary = f"Locally executed orchestrator step `{step.id}`."
     if step.id == "identify-project":
         info = write_project_identity(project_root, state)

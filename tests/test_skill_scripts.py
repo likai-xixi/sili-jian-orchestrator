@@ -18,6 +18,7 @@ import bootstrap_governance  # noqa: E402
 import change_request_control  # noqa: E402
 import close_session  # noqa: E402
 import completion_consumer  # noqa: E402
+import common  # noqa: E402
 import configure_review_controls  # noqa: E402
 import configure_autonomy  # noqa: E402
 import context_rollover  # noqa: E402
@@ -6265,6 +6266,22 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             )
 
             self.assertEqual(scenario_from_intent("auto", project_root), "session-recovery")
+
+    def test_ensure_dual_review_state_adds_defaults(self):
+        payload = {"current_status": "draft"}
+        common.ensure_dual_review_state(payload)
+        self.assertIn("dual_review_enabled", payload)
+        self.assertIn("review_pass_1", payload)
+        self.assertIn("review_pass_2", payload)
+        self.assertIn("review_conflict", payload)
+        self.assertIn("review_run_id", payload)
+        self.assertIn("review_commit_sha", payload)
+        self.assertFalse(payload["dual_review_enabled"])
+        self.assertIsNone(payload["review_pass_1"])
+        self.assertIsNone(payload["review_pass_2"])
+        self.assertFalse(payload["review_conflict"])
+        self.assertEqual(payload["review_run_id"], "")
+        self.assertEqual(payload["review_commit_sha"], "")
 
     def test_validate_gates_fails_closed_when_state_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
