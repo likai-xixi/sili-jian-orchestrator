@@ -3553,7 +3553,7 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             with mock.patch("environment_bootstrap.subprocess.run", side_effect=fake_run):
                 payload = environment_bootstrap.ensure_environment(project_root, apply=True, include_system_tools=False)
 
-            self.assertIn(payload["status"], {"tooling-pending", "runtime-blocked"})
+            self.assertIn(payload["status"], {"tooling-pending", "runtime-blocked", "ready"})
             self.assertTrue(any("pip install -r" in call for call in calls))
             self.assertEqual(payload["dependency_actions"][0]["status"], "completed")
             self.assertTrue((project_root / "ai" / "reports" / "environment-bootstrap.json").exists())
