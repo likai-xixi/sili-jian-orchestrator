@@ -6279,6 +6279,10 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
         self.assertIn("review_arbitration_required", payload)
         self.assertIn("review_arbitration_status", payload)
         self.assertIn("review_arbitration_evidence", payload)
+        self.assertIn("review_pass_1_run_id", payload)
+        self.assertIn("review_pass_2_run_id", payload)
+        self.assertIn("review_pass_1_commit_sha", payload)
+        self.assertIn("review_pass_2_commit_sha", payload)
         self.assertFalse(payload["dual_review_enabled"])
         self.assertIsNone(payload["review_pass_1"])
         self.assertIsNone(payload["review_pass_2"])
@@ -6288,6 +6292,10 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
         self.assertFalse(payload["review_arbitration_required"])
         self.assertEqual(payload["review_arbitration_status"], "")
         self.assertEqual(payload["review_arbitration_evidence"], "")
+        self.assertEqual(payload["review_pass_1_run_id"], "")
+        self.assertEqual(payload["review_pass_2_run_id"], "")
+        self.assertEqual(payload["review_pass_1_commit_sha"], "")
+        self.assertEqual(payload["review_pass_2_commit_sha"], "")
 
     def test_ensure_dual_review_state_marks_conflict_and_pending_arbitration(self):
         payload = {
@@ -6525,6 +6533,65 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertTrue(report["review_arbitration_required"])
             self.assertFalse(report["review_arbitration_ready"])
             self.assertIn("dual-review:missing-arbitration-evidence", report["blocker_sources"])
+            self.assertFalse(report["final_gate_passed"])
+
+    def test_validate_gates_blocks_on_dual_review_run_or_commit_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "final-audit",
+                        "current_status": "accepted",
+                        "current_workflow": "feature-delivery",
+                        "execution_allowed": True,
+                        "release_allowed": False,
+                        "dual_review_enabled": True,
+                        "review_pass_1": "PASS",
+                        "review_pass_2": "PASS",
+                        "review_conflict": False,
+                        "review_arbitration_required": False,
+                        "review_pass_1_run_id": "run-001",
+                        "review_pass_2_run_id": "run-002",
+                        "review_pass_1_commit_sha": "abc123",
+                        "review_pass_2_commit_sha": "abc123",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+            (reports_dir / "test-report.md").write_text("## Recommendation\n\n- PASS\n", encoding="utf-8")
+            (reports_dir / "acceptance-report.md").write_text("## Final Conclusion\n\n- PASS\n", encoding="utf-8")
+            (reports_dir / "change-summary.md").write_text("# Change Summary\n", encoding="utf-8")
+            (reports_dir / "gate-report.md").write_text(
+                "## Recommendation\n\n- PASS\n\n- mainline regression passed: YES\n- rollback point available: N/A\n",
+                encoding="utf-8",
+            )
+            (reports_dir / "department-approval-matrix.md").write_text(
+                "# Department Approval Matrix\n\n"
+                "## Reviewer libu2\n\n- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer hubu\n\n- libu2: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer gongbu\n\n- libu2: PASS\n- hubu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer bingbu\n\n- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- libu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer libu\n\n- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer xingbu\n\n- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer duchayuan-pass1\n\n- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Reviewer duchayuan-pass2\n\n- libu2: PASS\n- hubu: PASS\n- gongbu: PASS\n- bingbu: PASS\n- libu: PASS\n- xingbu: PASS\n- findings: none\n- responses: none\n- closure: closed\n\n"
+                "## Recommendation\n\n- PASS\n",
+                encoding="utf-8",
+            )
+
+            report = validate_gates.validate(project_root)
+            self.assertFalse(report["dual_review_identity_ready"])
+            self.assertIn("dual-review:run-or-commit-mismatch", report["blocker_sources"])
             self.assertFalse(report["final_gate_passed"])
 
     def test_validate_gates_dual_review_conflict_blocks_final_gate(self):

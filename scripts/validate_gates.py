@@ -383,13 +383,29 @@ def validate(project_root: Path) -> dict:
         review_arbitration_status == "resolved" and bool(review_arbitration_evidence)
     )
 
+    review_pass_1_run_id = str(state.get("review_pass_1_run_id") or "").strip()
+    review_pass_2_run_id = str(state.get("review_pass_2_run_id") or "").strip()
+    review_pass_1_commit_sha = str(state.get("review_pass_1_commit_sha") or "").strip().lower()
+    review_pass_2_commit_sha = str(state.get("review_pass_2_commit_sha") or "").strip().lower()
+    dual_review_identity_ready = True
+    if dual_review_enabled:
+        dual_review_identity_ready = all(
+            [review_pass_1_run_id, review_pass_2_run_id, review_pass_1_commit_sha, review_pass_2_commit_sha]
+        ) and review_pass_1_run_id == review_pass_2_run_id and review_pass_1_commit_sha == review_pass_2_commit_sha
+
     dual_review_gate_ready = (not dual_review_enabled) or (
-        review_pass_1 == "PASS" and review_pass_2 == "PASS" and not review_conflict and review_arbitration_ready
+        review_pass_1 == "PASS"
+        and review_pass_2 == "PASS"
+        and not review_conflict
+        and review_arbitration_ready
+        and dual_review_identity_ready
     )
     if dual_review_enabled and not dual_review_gate_ready:
         blocker_sources.append("dual-review:pending-or-conflict")
     if dual_review_enabled and review_arbitration_required and not review_arbitration_ready:
         blocker_sources.append("dual-review:missing-arbitration-evidence")
+    if dual_review_enabled and not dual_review_identity_ready:
+        blocker_sources.append("dual-review:run-or-commit-mismatch")
 
     release_artifacts_ready = (
         acceptance_ok
@@ -458,6 +474,11 @@ def validate(project_root: Path) -> dict:
         "review_arbitration_status": review_arbitration_status,
         "review_arbitration_evidence": review_arbitration_evidence,
         "review_arbitration_ready": review_arbitration_ready,
+        "review_pass_1_run_id": review_pass_1_run_id,
+        "review_pass_2_run_id": review_pass_2_run_id,
+        "review_pass_1_commit_sha": review_pass_1_commit_sha,
+        "review_pass_2_commit_sha": review_pass_2_commit_sha,
+        "dual_review_identity_ready": dual_review_identity_ready,
         "dual_review_gate_ready": dual_review_gate_ready,
         "test_conclusion": test_conclusion,
         "matrix_recommendation": matrix_recommendation,
