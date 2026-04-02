@@ -6610,6 +6610,34 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertNotIn("test-report.md", report["placeholder_sources"])
             self.assertTrue(report["phase_gate_passed"])
 
+    def test_validate_gates_requires_doc_coverage_at_final_audit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            state_dir = project_root / "ai" / "state"
+            reports_dir = project_root / "ai" / "reports"
+            state_dir.mkdir(parents=True)
+            reports_dir.mkdir(parents=True)
+
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps(
+                    {
+                        "current_phase": "final-audit",
+                        "current_status": "final-audit",
+                        "current_workflow": "feature-delivery",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (state_dir / "project-handoff.md").write_text("# Project Handoff\n", encoding="utf-8")
+
+            report = validate_gates.validate(project_root)
+            self.assertTrue(report["doc_coverage_required"])
+            self.assertIn("doc-coverage-report:missing", report["blocker_sources"])
+            self.assertFalse(report["phase_gate_passed"])
+
     def test_validate_gates_blocks_review_stage_without_required_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"

@@ -308,12 +308,33 @@ def validate(project_root: Path) -> dict:
     if resource_report.get("blocking_gap_count") or resource_report.get("release_validation_pending"):
         blocker_sources.append("resource-gap-report.md")
 
+    doc_coverage_required = current_status in {"final-audit", "accepted", "committed", "archived"} or bool(release_allowed)
+    if doc_coverage_required and not doc_coverage_report:
+        blocker_sources.append("doc-coverage-report:missing")
+
     if doc_coverage_report:
         decision_hint = doc_coverage_report.get("decision_hint", {})
+        summary = doc_coverage_report.get("summary", {})
         if decision_hint.get("block_high_risk_if_missing"):
             blocker_sources.append("doc-coverage-report:high-risk-missing")
         if decision_hint.get("high_risk_alert_if_unregistered_in_docs"):
             blocker_sources.append("doc-coverage-report:unregistered-feature-ref")
+        if doc_coverage_required and decision_hint.get("conditional_block_if_medium_missing"):
+            blocker_sources.append("doc-coverage-report:medium-risk-pending-arbitration")
+
+        config_ref = doc_coverage_report.get("config_ref", {}).get("shadowToStrict", {})
+        coverage_min = config_ref.get("coverageRateMin", 0)
+        try:
+            coverage_min_value = float(coverage_min)
+        except (TypeError, ValueError):
+            coverage_min_value = 0.0
+        doc_target_coverage = summary.get("doc_target_coverage_rate", 1)
+        try:
+            doc_target_coverage_value = float(doc_target_coverage)
+        except (TypeError, ValueError):
+            doc_target_coverage_value = 0.0
+        if doc_coverage_required and doc_target_coverage_value < coverage_min_value:
+            blocker_sources.append("doc-coverage-report:doc-target-coverage-below-threshold")
 
     test_conclusion = extract_conclusion(test_text, "Recommendation").upper()
     matrix_recommendation = extract_conclusion(matrix_text, "Recommendation").upper()
@@ -407,6 +428,7 @@ def validate(project_root: Path) -> dict:
         "resource_due_now_count": resource_report.get("due_now_count", 0),
         "resource_requires_user_input": resource_report.get("requires_user_input", False),
         "doc_coverage_enabled": doc_coverage_enabled,
+        "doc_coverage_required": doc_coverage_required,
         "doc_coverage_report": doc_coverage_report,
         "phase_gate_passed": phase_gate_passed,
         "release_stage": release_stage,
