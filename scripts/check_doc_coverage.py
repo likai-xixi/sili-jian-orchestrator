@@ -111,12 +111,28 @@ def build_report(registry: dict, ir_payload: dict, config: dict | None = None) -
     }
 
 
+def append_history(history_path: Path, report: dict) -> None:
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "generated_at": report.get("generated_at", ""),
+        "repo_id": report.get("repo_id", ""),
+        "feature_ref_coverage_rate": report.get("summary", {}).get("feature_ref_coverage_rate", 0),
+        "doc_target_coverage_rate": report.get("summary", {}).get("doc_target_coverage_rate", 0),
+        "missing_in_docs": len(report.get("missing_in_docs", [])),
+        "high_risk_missing_in_docs": len(report.get("high_risk_missing_in_docs", [])),
+        "unregistered_in_docs": len(report.get("unregistered_in_docs", [])),
+    }
+    with history_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check doc coverage against feature registry")
     parser.add_argument("--registry", required=True, type=Path)
     parser.add_argument("--doc-ir", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--config", required=False, type=Path)
+    parser.add_argument("--history", required=False, type=Path, help="optional jsonl history output")
     args = parser.parse_args()
 
     if not args.registry.exists():
@@ -133,6 +149,9 @@ def main() -> int:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    if args.history:
+        append_history(args.history, report)
 
     print(f"DOC_COVERAGE_OK: {args.out}")
     print(f"FEATURE_REF_COVERAGE_RATE: {report['summary']['feature_ref_coverage_rate']}")
