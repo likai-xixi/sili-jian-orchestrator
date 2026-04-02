@@ -5520,7 +5520,13 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp) / "project"
             reports_dir = project_root / "ai" / "reports"
+            state_dir = project_root / "ai" / "state"
             reports_dir.mkdir(parents=True)
+            state_dir.mkdir(parents=True)
+            (state_dir / "orchestrator-state.json").write_text(
+                json.dumps({"current_status": "planning"}, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
 
             (reports_dir / "planning-opinion-duchayuan-pass1.md").write_text(
                 "# Planning Opinion\n\n## Recommendation\n\n- PASS\n\n- api contract freeze\n- keep rollout staged\n",
@@ -5547,6 +5553,11 @@ payload.with_suffix('.closed.txt').write_text(data.get('session_key', ''), encod
             self.assertIn("conflict-detected", diff_text)
             self.assertIn("api contract freeze", diff_text)
             self.assertIn("add extra smoke tests", diff_text)
+
+            state = json.loads((state_dir / "orchestrator-state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["planning_dual_review_status"], "conflict-detected")
+            self.assertIn("[Planning Dual Review]", state["planning_dual_review_window_summary"])
+            self.assertIn("planning-dual-review-diff.md", state["next_action"])
 
     def test_resume_customer_decision_restarts_planning_for_scope_reduction(self):
         with tempfile.TemporaryDirectory() as tmp:

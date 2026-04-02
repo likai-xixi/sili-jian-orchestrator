@@ -1004,14 +1004,17 @@ def write_planning_dual_review_diff(project_root: Path, info: dict[str, Any]) ->
 
     if pass1_text and pass2_text:
         if not only_pass1 and not only_pass2 and str(pass1_rec).upper() == str(pass2_rec).upper():
-            lines.append("- status: aligned")
-            lines.append("- detail: no material conflict detected between pass1/pass2 planning opinions")
+            summary_status = "aligned"
+            summary_detail = "no material conflict detected between pass1/pass2 planning opinions"
         else:
-            lines.append("- status: conflict-detected")
-            lines.append("- detail: reconcile the differences below before freezing the plan")
+            summary_status = "conflict-detected"
+            summary_detail = "reconcile the differences below before freezing the plan"
     else:
-        lines.append("- status: pending-input")
-        lines.append("- detail: waiting for both planning opinion reports")
+        summary_status = "pending-input"
+        summary_detail = "waiting for both planning opinion reports"
+
+    lines.append(f"- status: {summary_status}")
+    lines.append(f"- detail: {summary_detail}")
 
     lines.extend(["", "## Pass1 Only Items"])
     if only_pass1:
@@ -1030,6 +1033,22 @@ def write_planning_dual_review_diff(project_root: Path, info: dict[str, Any]) ->
     lines.append(f"- pass2_report: {pass2_path}")
 
     write_text(reports_dir(project_root) / "planning-dual-review-diff.md", "\n".join(lines).rstrip() + "\n")
+
+    state_file = state_path(project_root)
+    if state_file.exists():
+        state = require_valid_json(state_file, "ai/state/orchestrator-state.json")
+        state["planning_dual_review_status"] = summary_status
+        state["planning_dual_review_detail"] = summary_detail
+        state["planning_dual_review_updated_at"] = utc_now()
+        state["planning_dual_review_window_summary"] = (
+            f"[Planning Dual Review] status={summary_status}; pass1={pass1_rec}; pass2={pass2_rec}; "
+            f"only_pass1={len(only_pass1)}; only_pass2={len(only_pass2)}"
+        )
+        state["next_action"] = (
+            state["planning_dual_review_window_summary"]
+            + " — review ai/reports/planning-dual-review-diff.md and continue planning decision."
+        )
+        write_json(state_file, state)
 
 
 def write_planning_options_report(project_root: Path, info: dict[str, Any]) -> None:
