@@ -1,0 +1,23 @@
+{
+  "version": "v3.1.1",
+  "riskThresholds": {
+    "high": "strict-block",
+    "medium": "conditional-block",
+    "low": "warn-limited-pass"
+  },
+  "shadowToStrict": {
+    "observationDaysMin": 14,
+    "highRiskMissesMustBe": 0,
+    "coverageRateMin": 0.95,
+    "falsePositiveRateMax": 0.05,
+    "auditCompletenessMustBe": 1.0
+  },
+  "adapterFailureThreshold": {
+    "dailyFailureRateMax": 0.10,
+    "rolling1hFailureRateMax": 0.30
+  },
+  "arbitration": {
+    "mediumRiskWindowHours": 48,
+    "holidayExtensionToNextBusinessDay": true
+  }
+}

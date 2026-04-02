@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "doc-gate-config.schema.json",
+  "title": "Doc Gate Config",
+  "type": "object",
+  "required": [
+    "version",
+    "riskThresholds",
+    "shadowToStrict",
+    "adapterFailureThreshold",
+    "arbitration"
+  ],
+  "properties": {
+    "version": { "type": "string", "minLength": 1 },
+    "riskThresholds": {
+      "type": "object",
+      "required": ["high", "medium", "low"],
+      "properties": {
+        "high": { "type": "string", "enum": ["strict-block"] },
+        "medium": { "type": "string", "enum": ["conditional-block"] },
+        "low": { "type": "string", "enum": ["warn-limited-pass"] }
+      },
+      "additionalProperties": false
+    },
+    "shadowToStrict": {
+      "type": "object",
+      "required": [
+        "observationDaysMin",
+        "highRiskMissesMustBe",
+        "coverageRateMin",
+        "falsePositiveRateMax",
+        "auditCompletenessMustBe"
+      ],
+      "properties": {
+        "observationDaysMin": { "type": "integer", "minimum": 1 },
+        "highRiskMissesMustBe": { "type": "integer", "minimum": 0 },
+        "coverageRateMin": { "type": "number", "minimum": 0, "maximum": 1 },
+        "falsePositiveRateMax": { "type": "number", "minimum": 0, "maximum": 1 },
+        "auditCompletenessMustBe": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "adapterFailureThreshold": {
+      "type": "object",
+      "required": ["dailyFailureRateMax", "rolling1hFailureRateMax"],
+      "properties": {
+        "dailyFailureRateMax": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rolling1hFailureRateMax": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "arbitration": {
+      "type": "object",
+      "required": ["mediumRiskWindowHours", "holidayExtensionToNextBusinessDay"],
+      "properties": {
+        "mediumRiskWindowHours": { "type": "integer", "minimum": 1 },
+        "holidayExtensionToNextBusinessDay": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
